@@ -30,6 +30,28 @@ export interface MachineProfile {
 
 export const PRESET_DEVICE_TEMPLATES: Partial<MachineProfile>[] = [
   {
+    id: "fridge-compressor",
+    name: "Smart Inverter Refrigerator Compressor",
+    category: "Home Appliance & Refrigeration",
+    motorType: "Variable-Speed BLDC Inverter Compressor",
+    nominalRPM: 1800,
+    fundamentalHz: 30.0,
+    isoClass: "Class I",
+    warningRms: 0.15,
+    criticalRms: 0.65,
+    kurtosisThreshold: 3.8,
+    image: "https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?w=600&auto=format&fit=crop&q=80",
+    bearingType: "Hermetic Hydrodynamic Journal Bearing",
+    mountTorque: "14.0 Nm Rubber Damper",
+    detectionTarget: "hybrid",
+    physicsSummary: "Monitors reciprocating piston stroke, suction valve reed flutter, refrigerant flow cavitation hiss, and inverter carrier harmonics.",
+    anomalyRules: [
+      "Piston slap / Knock: High impulse kurtosis > 3.8 indicating mechanical shock",
+      "Valve reed flutter: 2X harmonic spike at 60.0 Hz exceeding 0.15g",
+      "Refrigerant leak / Gas starvation: Ultrasonic acoustic turbulence > 200 Hz"
+    ]
+  },
+  {
     id: "earthquake-seismic",
     name: "Seismic Early Warning & Tremor Detector",
     category: "Geophysical & Structural",
@@ -164,6 +186,28 @@ export const PRESET_DEVICE_TEMPLATES: Partial<MachineProfile>[] = [
 ];
 
 export const DEFAULT_MACHINES: MachineProfile[] = [
+  {
+    id: "fridge-compressor",
+    name: "Smart Inverter Refrigerator Compressor",
+    category: "Home Appliance & Refrigeration",
+    motorType: "Variable-Speed BLDC Inverter Compressor",
+    nominalRPM: 1800,
+    fundamentalHz: 30.0,
+    isoClass: "Class I",
+    warningRms: 0.15,
+    criticalRms: 0.65,
+    kurtosisThreshold: 3.8,
+    image: "https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?w=600&auto=format&fit=crop&q=80",
+    bearingType: "Hermetic Hydrodynamic Journal Bearing",
+    mountTorque: "14.0 Nm Rubber Damper",
+    detectionTarget: "hybrid",
+    physicsSummary: "Monitors reciprocating piston stroke, suction valve reed flutter, refrigerant flow cavitation hiss, and inverter carrier harmonics.",
+    anomalyRules: [
+      "Piston slap / Knock: High impulse kurtosis > 3.8 indicating mechanical shock",
+      "Valve reed flutter: 2X harmonic spike at 60.0 Hz exceeding 0.15g",
+      "Refrigerant leak / Gas starvation: Ultrasonic acoustic turbulence > 200 Hz"
+    ]
+  },
   {
     id: "desk-fan",
     name: "Industrial Desk Fan 01",

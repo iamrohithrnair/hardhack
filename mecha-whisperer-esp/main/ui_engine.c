@@ -16,6 +16,7 @@ static lv_chart_series_t *s_sine_series_green; // Lime Green (Trace 2)
 static lv_chart_series_t *s_sine_series_red;   // Hot Red/Pink (Trace 3)
 static lv_obj_t *s_sine_bold_rpm_label;
 static lv_obj_t *s_sine_sub_label;
+static lv_obj_t *s_sine_status_badge;
 static lv_obj_t *s_sine_rms_pill;
 static lv_obj_t *s_sine_kurt_pill;
 
@@ -65,10 +66,10 @@ static lv_obj_t *s_header_pill_label;
 static lv_obj_t *s_nav_dots[VIEW_MAX_COUNT];
 
 // Smoothing state variables (Low-pass EMA filters)
-static float s_smooth_rms = 0.082f;
-static float s_smooth_kurt = 2.94f;
-static float s_smooth_rpm = 2910.0f;
-static float s_smooth_f0 = 48.5f;
+static float s_smooth_rms = 0.065f;
+static float s_smooth_kurt = 2.85f;
+static float s_smooth_rpm = 1800.0f;
+static float s_smooth_f0 = 30.0f;
 static float s_sine_phase = 0.0f;
 
 static void btn_next_view_cb(lv_event_t *e) {
@@ -105,7 +106,7 @@ void ui_engine_set_view(ui_view_mode_t view) {
     }
 
     const char *titles[] = {
-        "1/10: SINE WAVE TRANSDUCER",
+        "1/10: SINE TRANSDUCER (FRIDGE)",
         "2/10: 24-BAND FFT SPECTRUM",
         "3/10: KURTOSIS SHOCK",
         "4/10: TRIPLE ACTIVITY RINGS",
@@ -132,7 +133,7 @@ ui_view_mode_t ui_engine_get_view(void) {
 }
 
 // -------------------------------------------------------------
-// VIEW 1: SINE WAVE TRANSDUCER (Hero Default)
+// VIEW 1: SINE WAVE TRANSDUCER (Hero Default - Fridge Compressor)
 // -------------------------------------------------------------
 static void create_view_1_sine(lv_obj_t *parent) {
     lv_obj_t *v = lv_obj_create(parent);
@@ -147,7 +148,7 @@ static void create_view_1_sine(lv_obj_t *parent) {
 
     // Glowing Tri-Axial Sine Waves
     s_sine_chart = lv_chart_create(v);
-    lv_obj_set_size(s_sine_chart, 344, 140);
+    lv_obj_set_size(s_sine_chart, 344, 136);
     lv_obj_set_pos(s_sine_chart, 0, 0);
     lv_chart_set_type(s_sine_chart, LV_CHART_TYPE_LINE);
     lv_chart_set_point_count(s_sine_chart, 48);
@@ -160,29 +161,35 @@ static void create_view_1_sine(lv_obj_t *parent) {
     s_sine_series_green = lv_chart_add_series(s_sine_chart, lv_color_hex(0x00FF66), LV_CHART_AXIS_PRIMARY_Y);
     s_sine_series_red   = lv_chart_add_series(s_sine_chart, lv_color_hex(0xFF2A54), LV_CHART_AXIS_PRIMARY_Y);
 
-    // Large Bold Readout
+    // Large Bold Readout (White Text)
     s_sine_bold_rpm_label = lv_label_create(v);
-    lv_label_set_text(s_sine_bold_rpm_label, "2,910 RPM");
+    lv_label_set_text(s_sine_bold_rpm_label, "1,800 RPM");
     lv_obj_set_style_text_color(s_sine_bold_rpm_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_sine_bold_rpm_label, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_pos(s_sine_bold_rpm_label, 10, 146);
+    lv_obj_set_pos(s_sine_bold_rpm_label, 10, 142);
+
+    s_sine_status_badge = lv_label_create(v);
+    lv_label_set_text(s_sine_status_badge, "● HEALTHY (NOMINAL)");
+    lv_obj_set_style_text_color(s_sine_status_badge, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_sine_status_badge, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_pos(s_sine_status_badge, 150, 144);
 
     s_sine_sub_label = lv_label_create(v);
-    lv_label_set_text(s_sine_sub_label, "48.5 Hz Fundamental Harmonic Lock");
+    lv_label_set_text(s_sine_sub_label, "30.0 Hz Inverter Compressor Harmonic Lock");
     lv_obj_set_style_text_color(s_sine_sub_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_sine_sub_label, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_pos(s_sine_sub_label, 10, 174);
+    lv_obj_set_pos(s_sine_sub_label, 10, 172);
 
-    // Metrics Row
+    // Metrics Row (White Text)
     s_sine_rms_pill = lv_label_create(v);
-    lv_label_set_text(s_sine_rms_pill, "⚡ 0.082g RMS");
-    lv_obj_set_style_text_color(s_sine_rms_pill, lv_color_hex(0xF5C544), LV_PART_MAIN);
+    lv_label_set_text(s_sine_rms_pill, "⚡ 0.065g RMS");
+    lv_obj_set_style_text_color(s_sine_rms_pill, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_sine_rms_pill, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(s_sine_rms_pill, 10, 202);
 
     s_sine_kurt_pill = lv_label_create(v);
-    lv_label_set_text(s_sine_kurt_pill, "🔥 Kurt: 2.94");
-    lv_obj_set_style_text_color(s_sine_kurt_pill, lv_color_hex(0x00FF66), LV_PART_MAIN);
+    lv_label_set_text(s_sine_kurt_pill, "🔥 Kurt: 2.85");
+    lv_obj_set_style_text_color(s_sine_kurt_pill, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_sine_kurt_pill, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(s_sine_kurt_pill, 185, 202);
 
@@ -195,7 +202,7 @@ static void create_view_1_sine(lv_obj_t *parent) {
     lv_obj_add_event_cb(btn_cal, btn_calib_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *lbl_btn = lv_label_create(btn_cal);
-    lv_label_set_text(lbl_btn, "CALIBRATE STETHOSCOPE");
+    lv_label_set_text(lbl_btn, "CALIBRATE COMPRESSOR");
     lv_obj_set_style_text_color(lbl_btn, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_btn, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_center(lbl_btn);
@@ -216,8 +223,8 @@ static void create_view_2_fft(lv_obj_t *parent) {
     s_view_objs[VIEW_FFT_SPECTRUM] = v;
 
     s_fft_peak_label = lv_label_create(v);
-    lv_label_set_text(s_fft_peak_label, "1X Harmonic Peak: 48.5 Hz");
-    lv_obj_set_style_text_color(s_fft_peak_label, lv_color_hex(0xF5C544), LV_PART_MAIN);
+    lv_label_set_text(s_fft_peak_label, "1X Harmonic Peak: 30.0 Hz");
+    lv_obj_set_style_text_color(s_fft_peak_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_fft_peak_label, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(s_fft_peak_label, 10, 8);
 
@@ -261,13 +268,13 @@ static void create_view_3_kurtosis(lv_obj_t *parent) {
     s_view_objs[VIEW_KURTOSIS_IMPACT] = v;
 
     s_kurt_bold_val = lv_label_create(v);
-    lv_label_set_text(s_kurt_bold_val, "2.94");
-    lv_obj_set_style_text_color(s_kurt_bold_val, lv_color_hex(0x00FF66), LV_PART_MAIN);
+    lv_label_set_text(s_kurt_bold_val, "2.85");
+    lv_obj_set_style_text_color(s_kurt_bold_val, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_kurt_bold_val, &lv_font_montserrat_18, LV_PART_MAIN);
     lv_obj_set_pos(s_kurt_bold_val, 10, 8);
 
     s_kurt_status_label = lv_label_create(v);
-    lv_label_set_text(s_kurt_status_label, "Gaussian Symmetry (Zero Spalling)");
+    lv_label_set_text(s_kurt_status_label, "Gaussian Symmetry (Zero Piston Slap)");
     lv_obj_set_style_text_color(s_kurt_status_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_kurt_status_label, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(s_kurt_status_label, 10, 36);
@@ -403,8 +410,8 @@ static void create_view_6_tacho(lv_obj_t *parent) {
     lv_obj_align(s_tacho_arc, LV_ALIGN_CENTER, 0, -20);
     lv_arc_set_bg_angles(s_tacho_arc, 135, 405);
     lv_arc_set_angles(s_tacho_arc, 135, 405);
-    lv_arc_set_range(s_tacho_arc, 0, 4500);
-    lv_arc_set_value(s_tacho_arc, 2910);
+    lv_arc_set_range(s_tacho_arc, 0, 3600);
+    lv_arc_set_value(s_tacho_arc, 1800);
     lv_obj_set_style_arc_width(s_tacho_arc, 18, LV_PART_MAIN);
     lv_obj_set_style_arc_color(s_tacho_arc, lv_color_hex(0x111111), LV_PART_MAIN);
     lv_obj_set_style_arc_width(s_tacho_arc, 18, LV_PART_INDICATOR);
@@ -412,7 +419,7 @@ static void create_view_6_tacho(lv_obj_t *parent) {
     lv_obj_clear_flag(s_tacho_arc, LV_OBJ_FLAG_CLICKABLE);
 
     s_tacho_rpm_label = lv_label_create(v);
-    lv_label_set_text(s_tacho_rpm_label, "2,910\nRPM");
+    lv_label_set_text(s_tacho_rpm_label, "1,800\nRPM");
     lv_obj_set_style_text_align(s_tacho_rpm_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_tacho_rpm_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_tacho_rpm_label, &lv_font_montserrat_18, LV_PART_MAIN);
@@ -434,8 +441,8 @@ static void create_view_7_fluid(lv_obj_t *parent) {
     s_view_objs[VIEW_FLUID_ENERGY_TANK] = v;
 
     s_fluid_val_label = lv_label_create(v);
-    lv_label_set_text(s_fluid_val_label, "ISO VELOCITY: 0.16 mm/s");
-    lv_obj_set_style_text_color(s_fluid_val_label, lv_color_hex(0x00F0FF), LV_PART_MAIN);
+    lv_label_set_text(s_fluid_val_label, "ISO VELOCITY: 0.12 mm/s");
+    lv_obj_set_style_text_color(s_fluid_val_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_fluid_val_label, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(s_fluid_val_label, 10, 8);
 
@@ -517,7 +524,7 @@ static void create_view_9_matrix(lv_obj_t *parent) {
 
     lv_obj_t *lbl_info = lv_label_create(v);
     lv_label_set_text(lbl_info, "24H ANOMALY OBSERVATION GRID");
-    lv_obj_set_style_text_color(lbl_info, lv_color_hex(0x00FF66), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_info, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_info, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(lbl_info, 10, 8);
 
@@ -551,19 +558,19 @@ static void create_view_10_diagnostics(lv_obj_t *parent) {
     s_view_objs[VIEW_BOLD_DIAGNOSTICS] = v;
 
     s_diag_iso_badge = lv_label_create(v);
-    lv_label_set_text(s_diag_iso_badge, "ISO 10816 CLASS A");
-    lv_obj_set_style_text_color(s_diag_iso_badge, lv_color_hex(0xF5C544), LV_PART_MAIN);
+    lv_label_set_text(s_diag_iso_badge, "ISO 10816 CLASS A (FRIDGE)");
+    lv_obj_set_style_text_color(s_diag_iso_badge, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_diag_iso_badge, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(s_diag_iso_badge, 10, 8);
 
     s_diag_bold_title = lv_label_create(v);
-    lv_label_set_text(s_diag_bold_title, "NOMINAL HARMONIC");
-    lv_obj_set_style_text_color(s_diag_bold_title, lv_color_hex(0x00FF66), LV_PART_MAIN);
+    lv_label_set_text(s_diag_bold_title, "HEALTHY (NOMINAL)");
+    lv_obj_set_style_text_color(s_diag_bold_title, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_diag_bold_title, &lv_font_montserrat_18, LV_PART_MAIN);
     lv_obj_set_pos(s_diag_bold_title, 10, 36);
 
     s_diag_recom_label = lv_label_create(v);
-    lv_label_set_text(s_diag_recom_label, "Machine is operating within optimal ISO limits. Rotational symmetry verified with zero bearing spalling.");
+    lv_label_set_text(s_diag_recom_label, "Refrigerator compressor operating in nominal state. Piston harmonics stable with zero valve flutter.");
     lv_label_set_long_mode(s_diag_recom_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_diag_recom_label, 330);
     lv_obj_set_style_text_color(s_diag_recom_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
@@ -588,8 +595,8 @@ void ui_engine_init(void) {
     lv_obj_add_event_cb(top_hdr, btn_next_view_cb, LV_EVENT_CLICKED, NULL);
 
     s_header_pill_label = lv_label_create(top_hdr);
-    lv_label_set_text(s_header_pill_label, "1/10: SINE WAVE TRANSDUCER");
-    lv_obj_set_style_text_color(s_header_pill_label, lv_color_hex(0xF5C544), LV_PART_MAIN);
+    lv_label_set_text(s_header_pill_label, "1/10: SINE TRANSDUCER (FRIDGE)");
+    lv_obj_set_style_text_color(s_header_pill_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_header_pill_label, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_center(s_header_pill_label);
 
@@ -637,7 +644,7 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
     s_smooth_rms = s_smooth_rms * 0.70f + metrics->rms_acceleration_g * 0.30f;
     s_smooth_kurt = s_smooth_kurt * 0.80f + metrics->kurtosis * 0.20f;
     s_smooth_rpm = s_smooth_rpm * 0.80f + (float)metrics->estimated_rpm * 0.20f;
-    s_smooth_f0 = s_smooth_f0 * 0.80f + (metrics->peak_freq_hz > 5.0f ? metrics->peak_freq_hz : 48.5f) * 0.20f;
+    s_smooth_f0 = s_smooth_f0 * 0.80f + (metrics->peak_freq_hz > 5.0f ? metrics->peak_freq_hz : 30.0f) * 0.20f;
 
     // Smooth continuous phase accumulation with kinetic boost on shake
     float speed_boost = (s_smooth_rms > 0.15f) ? (s_smooth_rms - 0.10f) * 0.15f : 0.0f;
@@ -650,7 +657,15 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
         snprintf(buf, sizeof(buf), "%lu RPM", (unsigned long)s_smooth_rpm);
         lv_label_set_text(s_sine_bold_rpm_label, buf);
 
-        snprintf(buf, sizeof(buf), "%.1f Hz Fundamental Harmonic Lock", s_smooth_f0);
+        if (metrics->health_score >= 70) {
+            lv_label_set_text(s_sine_status_badge, "● HEALTHY (NOMINAL)");
+        } else if (metrics->health_score >= 35) {
+            lv_label_set_text(s_sine_status_badge, "● MODERATE (WARNING)");
+        } else {
+            lv_label_set_text(s_sine_status_badge, "● CRITICAL (ANOMALY)");
+        }
+
+        snprintf(buf, sizeof(buf), "%.1f Hz Harmonic Lock", s_smooth_f0);
         lv_label_set_text(s_sine_sub_label, buf);
 
         snprintf(buf, sizeof(buf), "⚡ %.3fg RMS", s_smooth_rms);
@@ -660,11 +675,11 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
         lv_label_set_text(s_sine_kurt_pill, buf);
 
         // Dynamic kinetic amplitude scaling with live physical shakes
-        float amp = (s_smooth_rms / 0.08f) * 35.0f;
+        float amp = (s_smooth_rms / 0.065f) * 32.0f;
         if (amp > 120.0f) amp = 120.0f;
-        if (amp < 24.0f) amp = 24.0f;
+        if (amp < 22.0f) amp = 22.0f;
 
-        float shake_agitation = (s_smooth_rms > 0.15f) ? (s_smooth_rms - 0.10f) * 18.0f : 0.0f;
+        float shake_agitation = (s_smooth_rms > 0.12f) ? (s_smooth_rms - 0.08f) * 18.0f : 0.0f;
 
         for (int i = 0; i < 48; i++) {
             float theta = s_sine_phase + (float)i * 0.18f;
@@ -698,14 +713,11 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
         lv_label_set_text(s_kurt_bold_val, buf);
 
         if (s_smooth_kurt > 4.5f) {
-            lv_obj_set_style_text_color(s_kurt_bold_val, lv_color_hex(0xFF2A54), LV_PART_MAIN);
-            lv_label_set_text(s_kurt_status_label, "IMPACT SHOCK DETECTED (Bearing Spalling)");
+            lv_label_set_text(s_kurt_status_label, "IMPACT SHOCK DETECTED (Piston Knock)");
         } else if (s_smooth_kurt > 3.6f) {
-            lv_obj_set_style_text_color(s_kurt_bold_val, lv_color_hex(0xF59E0B), LV_PART_MAIN);
             lv_label_set_text(s_kurt_status_label, "Elevated Kurtosis Warning");
         } else {
-            lv_obj_set_style_text_color(s_kurt_bold_val, lv_color_hex(0x00FF66), LV_PART_MAIN);
-            lv_label_set_text(s_kurt_status_label, "Gaussian Symmetry (Zero Spalling)");
+            lv_label_set_text(s_kurt_status_label, "Gaussian Symmetry (Zero Knock)");
         }
 
         for (size_t i = 0; i < 36; i++) {
