@@ -1,15 +1,16 @@
 "use client";
 
 import React from "react";
-import { Volume2, VolumeX, Sparkles, Usb, Settings2 } from "lucide-react";
+import { Volume2, VolumeX, Sparkles, Usb, Wifi, Bluetooth, Settings2 } from "lucide-react";
 import { MachineProfile } from "../types/machine";
+import { ConnectionMode } from "../hooks/useDeviceStream";
 
 interface HeaderProps {
   isConnected: boolean;
-  connectionMode: "backend_ws" | "web_serial" | "simulation";
+  connectionMode: ConnectionMode;
   soundEnabled: boolean;
   onToggleSound: () => void;
-  onConnect: () => void;
+  onOpenConnectionModal: () => void;
   onOpenAIModal: () => void;
   onOpenDeviceModal: () => void;
   activeTab: string;
@@ -22,13 +23,28 @@ export const Header: React.FC<HeaderProps> = ({
   connectionMode,
   soundEnabled,
   onToggleSound,
-  onConnect,
+  onOpenConnectionModal,
   onOpenAIModal,
   onOpenDeviceModal,
   activeTab,
   setActiveTab,
   currentMachine
 }) => {
+  const getConnectionLabel = () => {
+    if (!isConnected) return "Pair Device";
+    if (connectionMode === "bluetooth") return "BLE Wireless";
+    if (connectionMode === "wifi_ws") return "Wi-Fi (192.168.4.1)";
+    if (connectionMode === "backend_ws") return "ESP32 Bridge";
+    if (connectionMode === "web_serial") return "USB Serial";
+    return "Simulation Mode";
+  };
+
+  const renderConnectionIcon = () => {
+    if (connectionMode === "bluetooth") return <Bluetooth className="w-3.5 h-3.5 text-amber-500" />;
+    if (connectionMode === "wifi_ws") return <Wifi className="w-3.5 h-3.5 text-sky-500" />;
+    return <Usb className="w-3.5 h-3.5 text-neutral-400" />;
+  };
+
   return (
     <header className="flex flex-col md:flex-row items-center justify-between py-2 gap-4">
       {/* Brand Capsule & Device Selector */}
@@ -92,9 +108,9 @@ export const Header: React.FC<HeaderProps> = ({
           {soundEnabled ? <Volume2 className="w-4 h-4 text-[#F5C544]" /> : <VolumeX className="w-4 h-4" />}
         </button>
 
-        {/* Connect USB / WebSocket Button */}
+        {/* Connect Wireless / USB Button */}
         <button
-          onClick={onConnect}
+          onClick={onOpenConnectionModal}
           className={`flex items-center gap-2 px-4 py-2 rounded-full border text-xs font-semibold transition-all cursor-pointer shadow-xs ${
             isConnected
               ? "bg-emerald-50 border-emerald-300 text-emerald-700"
@@ -108,14 +124,8 @@ export const Header: React.FC<HeaderProps> = ({
                 : "bg-neutral-300"
             }`}
           />
-          <span>
-            {isConnected
-              ? connectionMode === "backend_ws"
-                ? "ESP32-S3 (Bridge Live)"
-                : "ESP32-S3 (Web Serial)"
-              : "Pair ESP32-S3"}
-          </span>
-          <Usb className="w-3.5 h-3.5 text-neutral-400" />
+          <span>{getConnectionLabel()}</span>
+          {renderConnectionIcon()}
         </button>
 
         {/* User Profile */}

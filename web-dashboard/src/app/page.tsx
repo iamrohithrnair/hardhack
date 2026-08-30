@@ -12,6 +12,7 @@ import { DemoChecklistCard } from "../components/DemoChecklistCard";
 import { OscilloscopeTimelineCard } from "../components/OscilloscopeTimelineCard";
 import { AIDiagnosticModal } from "../components/AIDiagnosticModal";
 import { DeviceCustomizerModal } from "../components/DeviceCustomizerModal";
+import { ConnectionModal } from "../components/ConnectionModal";
 
 // Tab Views
 import { VibrationFFTView } from "../components/views/VibrationFFTView";
@@ -30,6 +31,10 @@ export default function DashboardPage() {
     setIsExamRunning,
     setSoundEnabled,
     connectWebSerial,
+    connectBluetooth,
+    connectWiFi,
+    connectSimulator,
+    disconnect,
     calibrate,
     setFaultMode
   } = useDeviceStream();
@@ -38,6 +43,7 @@ export default function DashboardPage() {
   const [currentMachine, setCurrentMachine] = useState<MachineProfile>(DEFAULT_MACHINES[0]);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
+  const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
 
   return (
     <div className="flex justify-center w-full min-h-screen px-4 sm:px-8 py-6">
@@ -48,7 +54,7 @@ export default function DashboardPage() {
           connectionMode={connectionMode}
           soundEnabled={soundEnabled}
           onToggleSound={() => setSoundEnabled(!soundEnabled)}
-          onConnect={connectWebSerial}
+          onOpenConnectionModal={() => setIsConnectionModalOpen(true)}
           onOpenAIModal={() => setIsAIModalOpen(true)}
           onOpenDeviceModal={() => setIsDeviceModalOpen(true)}
           activeTab={activeTab}
@@ -143,6 +149,19 @@ export default function DashboardPage() {
           onClose={() => setIsDeviceModalOpen(false)}
           currentMachine={currentMachine}
           onSelectMachine={(m) => setCurrentMachine(m)}
+        />
+
+        {/* Wireless Connection Selector Modal (BLE / Wi-Fi SoftAP / USB) */}
+        <ConnectionModal
+          isOpen={isConnectionModalOpen}
+          onClose={() => setIsConnectionModalOpen(false)}
+          isConnected={isConnected}
+          connectionMode={connectionMode}
+          onConnectWebSerial={connectWebSerial}
+          onConnectBluetooth={connectBluetooth}
+          onConnectWiFi={connectWiFi}
+          onConnectSimulator={connectSimulator}
+          onDisconnect={disconnect}
         />
       </div>
     </div>

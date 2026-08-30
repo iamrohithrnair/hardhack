@@ -16,6 +16,7 @@
 
 #include "dsp_engine.h"
 #include "ui_engine.h"
+#include "wifi_ble_manager.h"
 
 static const char *TAG = "mecha_whisperer";
 
@@ -130,11 +131,14 @@ void app_main(void) {
     }
     bsp_display_brightness_set(90);
 
-    // 2. Initialize IMU
+    // 2. Initialize Wireless Wi-Fi SoftAP & WebSocket Server
+    wifi_ble_manager_init();
+
+    // 3. Initialize IMU
     bsp_i2c_init();
     imu_init_board();
 
-    // 3. Build UI
+    // 4. Build UI
     if (bsp_display_lock(1000)) {
         ESP_LOGI(TAG, "Initializing UI Engine...");
         ui_engine_init();
@@ -144,10 +148,10 @@ void app_main(void) {
         ESP_LOGE(TAG, "Failed to acquire display lock for UI init!");
     }
 
-    // 4. Start high-speed IMU sampling task on Core 0
+    // 5. Start high-speed IMU sampling task on Core 0
     xTaskCreatePinnedToCore(imu_sampler_task, "imu_task", 4096, NULL, 5, NULL, 0);
 
-    // 5. Main UI & DSP Loop
+    // 6. Main UI & DSP Loop
     while (true) {
         // Prepare linear sample buffer
         if (dsp_engine_is_demo_mode() || !s_imu_ready) {
@@ -172,12 +176,14 @@ void app_main(void) {
             bsp_display_unlock();
         }
 
-        // Emit Serial Telemetry
+        // Emit Serial & Wireless Telemetry
         static uint32_t last_log = 0;
         uint32_t now = esp_timer_get_time() / 1000;
         if (now - last_log >= 100) {
             last_log = now;
-            printf("{\"rpm\":%lu,\"f0\":%.1f,\"rms\":%.3f,\"kurt\":%.2f,\"iso\":%.2f,\"score\":%d,\"state\":%d}\n",
+            char json_buf[192];
+            snprintf(json_buf, sizeof(json_buf),
+                   "{\"rpm\":%lu,\"f0\":%.1f,\"rms\":%.3f,\"kurt\":%.2f,\"iso\":%.2f,\"score\":%d,\"state\":%d}\n",
                    (unsigned long)metrics->estimated_rpm,
                    metrics->peak_freq_hz,
                    metrics->rms_acceleration_g,
@@ -185,6 +191,8 @@ void app_main(void) {
                    metrics->iso_vibration_vel,
                    metrics->health_score,
                    (int)metrics->state);
+            printf("%s", json_buf);
+            wifi_ble_broadcast_telemetry(json_buf);
         }
 
         vTaskDelay(pdMS_TO_TICKS(DSP_PERIOD_MS));

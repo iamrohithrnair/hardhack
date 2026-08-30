@@ -13,6 +13,8 @@ export interface TelemetryData {
   source?: "hardware" | "simulated";
 }
 
+export type ConnectionMode = "backend_ws" | "web_serial" | "bluetooth" | "wifi_ws" | "simulation";
+
 export function useDeviceStream() {
   const [telemetry, setTelemetry] = useState<TelemetryData>({
     rpm: 2910,
@@ -26,15 +28,16 @@ export function useDeviceStream() {
   });
 
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [connectionMode, setConnectionMode] = useState<"backend_ws" | "web_serial" | "simulation">("simulation");
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>("simulation");
   const [isExamRunning, setIsExamRunning] = useState<boolean>(true);
   const [examSeconds, setExamSeconds] = useState<number>(45);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const bleDeviceRef = useRef<any>(null);
+  const bleCharRef = useRef<any>(null);
   const serialPortRef = useRef<any>(null);
   const readerRef = useRef<any>(null);
-  const phaseRef = useRef<number>(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const motorOscRef = useRef<OscillatorNode | null>(null);
   const motorGainRef = useRef<GainNode | null>(null);
@@ -80,7 +83,7 @@ export function useDeviceStream() {
     motorGainRef.current.gain.setTargetAtTime(vol, audioCtxRef.current.currentTime, 0.05);
   }, [soundEnabled]);
 
-  // Connect via Python WebSocket Backend (ws://localhost:8765/ws)
+  // 1. Connect via Python WebSocket Backend (ws://localhost:8765/ws)
   const connectWebSocket = useCallback(() => {
     try {
       const ws = new WebSocket("ws://localhost:8765/ws");
@@ -100,9 +103,42 @@ export function useDeviceStream() {
               return updated;
             });
           }
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+      };
+
+      wsRef.current = ws;
+    } catch (err) {}
+  }, [updateAudioPitch]);
+
+  // 2. Connect via Wi-Fi SoftAP / Network WebSocket (ws://192.168.4.1/ws)
+  const connectWiFi = useCallback((ip: string = "192.168.4.1") => {
+    initAudio();
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+
+    try {
+      const wsUrl = `ws://${ip}/ws`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        setIsConnected(true);
+        setConnectionMode("wifi_ws");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setTelemetry((prev) => {
+            const updated = { ...prev, ...data, source: "hardware" };
+            updateAudioPitch(updated.f0, updated.state);
+            return updated;
+          });
+        } catch (e) {}
       };
 
       ws.onclose = () => {
@@ -111,18 +147,62 @@ export function useDeviceStream() {
 
       wsRef.current = ws;
     } catch (err) {
-      // WS unavailable
+      alert(`Could not connect to Wi-Fi stream at ws://${ip}/ws. Please ensure you are connected to the 'MECHA-WHISPERER' Wi-Fi network.`);
     }
-  }, [updateAudioPitch]);
+  }, [initAudio, updateAudioPitch]);
 
-  // Connect via direct in-browser Web Serial API
+  // 3. Connect via Web Bluetooth API (BLE 5.0 Wireless)
+  const connectBluetooth = useCallback(async () => {
+    initAudio();
+
+    if (!("bluetooth" in navigator)) {
+      alert("Web Bluetooth API is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
+      return;
+    }
+
+    try {
+      const device = await (navigator as any).bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ["4fafc201-1fb5-459e-8fcc-c5c9c331914b", "generic_access"]
+      });
+
+      const server = await device.gatt.connect();
+      bleDeviceRef.current = device;
+      setIsConnected(true);
+      setConnectionMode("bluetooth");
+
+      try {
+        const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+        const characteristic = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+        bleCharRef.current = characteristic;
+
+        await characteristic.startNotifications();
+        characteristic.addEventListener("characteristicvaluechanged", (event: any) => {
+          const decoder = new TextDecoder("utf-8");
+          const jsonStr = decoder.decode(event.target.value);
+          try {
+            const data = JSON.parse(jsonStr);
+            setTelemetry((prev) => {
+              const updated = { ...prev, ...data, source: "hardware" };
+              updateAudioPitch(updated.f0, updated.state);
+              return updated;
+            });
+          } catch (e) {}
+        });
+      } catch (svcErr) {
+        console.warn("BLE Characteristic subscription info:", svcErr);
+      }
+    } catch (err) {
+      console.warn("Bluetooth pairing error or cancelled:", err);
+    }
+  }, [initAudio, updateAudioPitch]);
+
+  // 4. Connect via Web Serial API
   const connectWebSerial = useCallback(async () => {
     initAudio();
 
     if (!("serial" in navigator)) {
-      alert("Web Serial API is not supported in this browser. Running in interactive simulator mode.");
-      setConnectionMode("simulation");
-      setIsConnected(true);
+      alert("Web Serial API is not supported in this browser.");
       return;
     }
 
@@ -157,9 +237,7 @@ export function useDeviceStream() {
                 updateAudioPitch(updated.f0, updated.state);
                 return updated;
               });
-            } catch (e) {
-              // ignore
-            }
+            } catch (e) {}
           }
         }
       }
@@ -169,11 +247,22 @@ export function useDeviceStream() {
     }
   }, [initAudio, updateAudioPitch]);
 
+  // 5. Connect Simulator
+  const connectSimulator = useCallback(() => {
+    initAudio();
+    setIsConnected(true);
+    setConnectionMode("simulation");
+  }, [initAudio]);
+
   // Disconnect
   const disconnect = useCallback(() => {
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
+    }
+    if (bleDeviceRef.current && bleDeviceRef.current.gatt.connected) {
+      bleDeviceRef.current.gatt.disconnect();
+      bleDeviceRef.current = null;
     }
     if (readerRef.current) {
       readerRef.current.cancel();
@@ -254,6 +343,9 @@ export function useDeviceStream() {
     setIsExamRunning,
     setSoundEnabled,
     connectWebSerial,
+    connectBluetooth,
+    connectWiFi,
+    connectSimulator,
     connectWebSocket,
     disconnect,
     calibrate,
