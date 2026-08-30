@@ -3,7 +3,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { TelemetryData } from "../hooks/useDeviceStream";
 import { MachineProfile } from "../types/machine";
-import { Activity, Waves, BarChart3, Zap, ShieldAlert, Sparkles } from "lucide-react";
 
 interface OscilloscopeTimelineCardProps {
   telemetry: TelemetryData;
@@ -17,20 +16,17 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
   const [activeMode, setActiveMode] = useState<"classic" | "multiaxis">("classic");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const waveHistoryRef = useRef<number[]>(new Array(240).fill(0));
-  const waveHistoryYRef = useRef<number[]>(new Array(240).fill(0));
-  const waveHistoryZRef = useRef<number[]>(new Array(240).fill(0));
+  const waveHistoryRef = useRef<number[]>(new Array(220).fill(0));
+  const waveHistoryYRef = useRef<number[]>(new Array(220).fill(0));
+  const waveHistoryZRef = useRef<number[]>(new Array(220).fill(0));
   const fftHistoryRef = useRef<number[]>(new Array(28).fill(0.05));
   const fftPeaksRef = useRef<number[]>(new Array(28).fill(0.05));
   const phaseRef = useRef<number>(0);
   const smoothedRmsRef = useRef<number>(0.082);
 
   const isFault = telemetry.score < 50;
-
-  // Custom asset parameters
-  const targetHz = machine.fundamentalHz || 48.5;
-  const warnRms = machine.warningRms || 0.25;
-  const kurtThresh = machine.kurtosisThreshold || 4.0;
+  const targetHz = machine?.fundamentalHz || 48.5;
+  const warnRms = machine?.warningRms || 0.25;
 
   useEffect(() => {
     let animationFrameId: number;
@@ -49,7 +45,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       ctx.fillStyle = "#0D1017";
       ctx.fillRect(0, 0, w, h);
 
-      // Subtle Center Line
+      // Center baseline guide
       ctx.strokeStyle = "#1E2330";
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -59,7 +55,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
 
       // Fast-reacting low-pass filter so physical shakes produce instant visual response
       const liveRms = telemetry.rms || 0.082;
-      smoothedRmsRef.current = smoothedRmsRef.current * 0.72 + liveRms * 0.28;
+      smoothedRmsRef.current = smoothedRmsRef.current * 0.70 + liveRms * 0.30;
 
       // Dynamic Angular Phase Speed driven by fundamental frequency + motion kinetic speed
       const displayHz = telemetry.f0 > 1.0 ? telemetry.f0 : targetHz;
@@ -67,13 +63,13 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       const shakeSpeedBoost = Math.max(0, (smoothedRmsRef.current - 0.12) * 0.15);
       phaseRef.current += baseSpeed + shakeSpeedBoost;
 
-      // Dynamic Kinetic Amplitude scaling with live sensor vibrations
+      // Dynamic Kinetic Amplitude scaling with live sensor vibrations (healthy, moderate, anomaly)
       const kineticScale = (smoothedRmsRef.current / Math.max(0.05, warnRms * 0.5));
-      const rmsAmp = Math.max(0.22, Math.min(2.1, 0.32 * kineticScale));
+      const rmsAmp = Math.max(0.24, Math.min(2.2, 0.34 * kineticScale));
 
       // Shake ripple perturbation when sensor moves
-      const isShaking = smoothedRmsRef.current > 0.15;
-      const shakeJitter = isShaking ? (smoothedRmsRef.current - 0.10) * 0.55 * Math.sin(phaseRef.current * 3.4) : 0;
+      const isShaking = smoothedRmsRef.current > 0.14;
+      const shakeJitter = isShaking ? (smoothedRmsRef.current - 0.10) * 0.65 * Math.sin(phaseRef.current * 3.4) : 0;
 
       let sampleX = (rmsAmp * Math.sin(phaseRef.current)) + shakeJitter;
       let sampleY = (rmsAmp * 0.75 * Math.sin(phaseRef.current + 1.2)) + shakeJitter * 0.8;
@@ -114,7 +110,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
         }
         if (telemetry.state === 3 && i === 4) specVal = 0.94;
 
-        fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.82 + specVal * 0.18;
+        fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.80 + specVal * 0.20;
         if (fftHistoryRef.current[i] > fftPeaksRef.current[i]) {
           fftPeaksRef.current[i] = fftHistoryRef.current[i];
         } else {
@@ -135,7 +131,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       }
 
       // -------------------------------------------------------------
-      // 2. Draw Glowing Sine Waves
+      // 2. Draw Smooth Micro-Vibration Trace
       // -------------------------------------------------------------
       if (activeMode === "multiaxis") {
         const renderTrace = (pts: number[], color: string, shadow: string, width: number) => {
@@ -196,15 +192,16 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
 
   return (
     <section className="bg-white rounded-[28px] p-6 border border-black/5 shadow-[0_12px_32px_rgba(0,0,0,0.03)] flex flex-col gap-4">
-      {/* Header with Timeline Date & Mode Switcher */}
+      {/* Header with Month Navigation, Machine Badge & Legend */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div className="flex items-center gap-3.5">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-sky-500 animate-pulse" />
-            <h3 className="text-base font-extrabold text-[#12141A]">
-              Physical Micro-Vibration Oscilloscope & FFT
-            </h3>
-          </div>
+          <span className="text-xs text-[#9CA3AF] font-semibold hover:text-[#12141A] cursor-pointer">
+            August
+          </span>
+          <span className="text-sm font-bold text-[#12141A]">September 2026</span>
+          <span className="text-xs text-[#9CA3AF] font-semibold hover:text-[#12141A] cursor-pointer">
+            October
+          </span>
           <span className="px-2.5 py-0.5 rounded-full bg-black/[0.04] border border-black/5 text-[11px] font-mono font-bold text-[#6B7280] uppercase">
             {machine.name} ({targetHz} Hz)
           </span>
@@ -220,7 +217,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
                 : "bg-neutral-100 hover:bg-neutral-200 text-[#4B5563]"
             }`}
           >
-            Smooth Sine Wave
+            Classic Smooth Wave
           </button>
           <button
             onClick={() => setActiveMode("multiaxis")}
@@ -275,7 +272,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
           <div className="absolute top-3 left-[68%] bg-emerald-950/80 border border-emerald-500/30 border-l-4 border-l-emerald-400 backdrop-blur-md px-3.5 py-1.5 rounded-full text-white shadow-md pointer-events-none flex flex-col">
             <span className="text-[11px] font-bold text-emerald-300">Gaussian Symmetry</span>
             <span className="text-[9px] text-emerald-200 font-mono">
-              Kurtosis: {telemetry.kurt.toFixed(2)} &lt; {kurtThresh}
+              Kurtosis: {telemetry.kurt.toFixed(2)} &lt; {machine.kurtosisThreshold || 4.0}
             </span>
           </div>
         )}
@@ -291,10 +288,10 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       {/* Timeline Axis Labels */}
       <div className="flex justify-between text-[11px] text-[#9CA3AF] font-semibold px-2 font-mono">
         <span>00:00s</span>
-        <span>00:15s (Calibration Lock)</span>
-        <span>00:30s (Spectral Analysis)</span>
-        <span>00:45s (Dynamic Tracking)</span>
-        <span>01:00s (Health Assessment)</span>
+        <span>00:15s (Exam Start)</span>
+        <span>00:30s (Nominal Lock)</span>
+        <span>00:45s (Fault Induced)</span>
+        <span>01:00s (Diagnosis Complete)</span>
       </div>
     </section>
   );
