@@ -274,10 +274,15 @@ void app_main(void) {
         dsp_engine_process_vibration(s_vibration_snapshot, BUFFER_SIZE, 250.0f);
         const DiagnosticMetrics *metrics = dsp_engine_get_metrics();
 
-        // Update UI
-        if (bsp_display_lock(50)) {
-            ui_engine_update(metrics, s_vibration_snapshot, BUFFER_SIZE);
-            bsp_display_unlock();
+        // Update UI at a stable 25 Hz (40ms) rate to prevent bus flooding and glitching
+        static uint32_t last_ui_update = 0;
+        uint32_t now_ms = esp_timer_get_time() / 1000;
+        if (now_ms - last_ui_update >= 40) {
+            last_ui_update = now_ms;
+            if (bsp_display_lock(50)) {
+                ui_engine_update(metrics, s_vibration_snapshot, BUFFER_SIZE);
+                bsp_display_unlock();
+            }
         }
 
         // Emit Serial & Wireless Telemetry

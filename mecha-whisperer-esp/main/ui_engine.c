@@ -42,7 +42,6 @@ static lv_obj_t *s_progress_val_label;
 // View 6: Rotational Tachometer
 static lv_obj_t *s_tacho_arc;
 static lv_obj_t *s_tacho_rpm_label;
-static lv_obj_t *s_tacho_sub_label;
 
 // View 7: Fluid Energy Density Wave Level
 static lv_obj_t *s_fluid_bar;
@@ -64,6 +63,13 @@ static lv_obj_t *s_diag_iso_badge;
 // Shared Navigation & Header
 static lv_obj_t *s_header_pill_label;
 static lv_obj_t *s_nav_dots[VIEW_MAX_COUNT];
+
+// Smoothing state variables (Low-pass EMA filters)
+static float s_smooth_rms = 0.082f;
+static float s_smooth_kurt = 2.94f;
+static float s_smooth_rpm = 2910.0f;
+static float s_smooth_f0 = 48.5f;
+static float s_sine_phase = 0.0f;
 
 static void btn_next_view_cb(lv_event_t *e) {
     (void)e;
@@ -87,7 +93,6 @@ void ui_engine_set_view(ui_view_mode_t view) {
                 lv_obj_add_flag(s_view_objs[i], LV_OBJ_FLAG_HIDDEN);
             }
         }
-        // Update 10 pagination dots
         if (s_nav_dots[i]) {
             if (i == s_current_view) {
                 lv_obj_set_style_bg_color(s_nav_dots[i], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
@@ -146,7 +151,7 @@ static void create_view_1_sine(lv_obj_t *parent) {
     lv_obj_set_size(s_sine_chart, 334, 130);
     lv_obj_set_pos(s_sine_chart, 0, 4);
     lv_chart_set_type(s_sine_chart, LV_CHART_TYPE_LINE);
-    lv_chart_set_point_count(s_sine_chart, 54);
+    lv_chart_set_point_count(s_sine_chart, 48);
     lv_chart_set_range(s_sine_chart, LV_CHART_AXIS_PRIMARY_Y, -120, 120);
     lv_obj_set_style_bg_opa(s_sine_chart, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_sine_chart, 0, LV_PART_MAIN);
@@ -276,7 +281,7 @@ static void create_view_3_kurtosis(lv_obj_t *parent) {
     lv_obj_set_size(s_kurt_chart, 334, 180);
     lv_obj_set_pos(s_kurt_chart, 0, 64);
     lv_chart_set_type(s_kurt_chart, LV_CHART_TYPE_LINE);
-    lv_chart_set_point_count(s_kurt_chart, 40);
+    lv_chart_set_point_count(s_kurt_chart, 36);
     lv_chart_set_range(s_kurt_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
     lv_obj_set_style_bg_color(s_kurt_chart, lv_color_hex(0x12151E), LV_PART_MAIN);
     lv_obj_set_style_border_color(s_kurt_chart, lv_color_hex(0x202634), LV_PART_MAIN);
@@ -645,36 +650,50 @@ void ui_engine_init(void) {
 void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_waveform, size_t osc_count) {
     if (!metrics) return;
 
+    // Apply EMA low-pass smoothing filters to eliminate jitter and flickering
+    s_smooth_rms = s_smooth_rms * 0.85f + metrics->rms_acceleration_g * 0.15f;
+    s_smooth_kurt = s_smooth_kurt * 0.90f + metrics->kurtosis * 0.10f;
+    s_smooth_rpm = s_smooth_rpm * 0.85f + (float)metrics->estimated_rpm * 0.15f;
+    s_smooth_f0 = s_smooth_f0 * 0.85f + (metrics->peak_freq_hz > 5.0f ? metrics->peak_freq_hz : 48.5f) * 0.15f;
+
+    // Smooth continuous phase accumulation
+    s_sine_phase += 0.14f;
+
     char buf[64];
 
     // VIEW 1: SINE WAVE TRANSDUCER
     if (s_current_view == VIEW_SINE_WAVE_TRANSDUCER) {
-        snprintf(buf, sizeof(buf), "%lu", (unsigned long)metrics->estimated_rpm);
+        snprintf(buf, sizeof(buf), "%lu", (unsigned long)s_smooth_rpm);
         lv_label_set_text(s_sine_bold_rpm_label, buf);
 
-        snprintf(buf, sizeof(buf), "Rotor RPM · %.1f Hz Fundamental", metrics->peak_freq_hz);
+        snprintf(buf, sizeof(buf), "Rotor RPM · %.1f Hz Fundamental", s_smooth_f0);
         lv_label_set_text(s_sine_sub_label, buf);
 
-        snprintf(buf, sizeof(buf), "⚡ %.3fg RMS", metrics->rms_acceleration_g);
+        snprintf(buf, sizeof(buf), "⚡ %.3fg RMS", s_smooth_rms);
         lv_label_set_text(s_sine_rms_pill, buf);
 
-        snprintf(buf, sizeof(buf), "🔥 Kurt: %.2f", metrics->kurtosis);
+        snprintf(buf, sizeof(buf), "🔥 Kurt: %.2f", s_smooth_kurt);
         lv_label_set_text(s_sine_kurt_pill, buf);
 
-        for (size_t i = 0; i < 54; i++) {
-            size_t idx = (i * osc_count) / 54;
-            int32_t val_x = (int32_t)(osc_waveform[idx] * 110.0f);
-            int32_t val_y = (int32_t)(osc_waveform[(idx + 10) % osc_count] * 80.0f);
-            int32_t val_z = (int32_t)(osc_waveform[(idx + 20) % osc_count] * 95.0f);
+        float amp = s_smooth_rms * 120.0f;
+        if (amp > 100.0f) amp = 100.0f;
+        if (amp < 18.0f) amp = 18.0f;
+
+        for (int i = 0; i < 48; i++) {
+            float theta = s_sine_phase + (float)i * 0.18f;
+            int32_t val_x = (int32_t)(amp * sinf(theta));
+            int32_t val_y = (int32_t)(amp * 0.75f * sinf(theta + 1.2f));
+            int32_t val_z = (int32_t)(amp * 0.85f * sinf(theta + 2.4f));
             lv_chart_set_value_by_id(s_sine_chart, s_sine_series_cyan, i, val_x);
             lv_chart_set_value_by_id(s_sine_chart, s_sine_series_green, i, val_y);
             lv_chart_set_value_by_id(s_sine_chart, s_sine_series_red, i, val_z);
         }
+        lv_chart_refresh(s_sine_chart);
     }
 
     // VIEW 2: 24-BAND FFT SPECTRUM
     else if (s_current_view == VIEW_FFT_SPECTRUM) {
-        snprintf(buf, sizeof(buf), "1X Peak: %.1f Hz", metrics->peak_freq_hz);
+        snprintf(buf, sizeof(buf), "1X Peak: %.1f Hz", s_smooth_f0);
         lv_label_set_text(s_fft_peak_label, buf);
 
         for (int i = 0; i < 24; i++) {
@@ -686,13 +705,13 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
 
     // VIEW 3: KURTOSIS IMPACT
     else if (s_current_view == VIEW_KURTOSIS_IMPACT) {
-        snprintf(buf, sizeof(buf), "%.2f", metrics->kurtosis);
+        snprintf(buf, sizeof(buf), "%.2f", s_smooth_kurt);
         lv_label_set_text(s_kurt_bold_val, buf);
 
-        if (metrics->kurtosis > 4.5f) {
+        if (s_smooth_kurt > 4.5f) {
             lv_obj_set_style_text_color(s_kurt_bold_val, lv_color_hex(0xFF2A54), LV_PART_MAIN);
             lv_label_set_text(s_kurt_status_label, "IMPACT SHOCK DETECTED (Bearing Spalling)");
-        } else if (metrics->kurtosis > 3.6f) {
+        } else if (s_smooth_kurt > 3.6f) {
             lv_obj_set_style_text_color(s_kurt_bold_val, lv_color_hex(0xF59E0B), LV_PART_MAIN);
             lv_label_set_text(s_kurt_status_label, "Elevated Kurtosis Warning");
         } else {
@@ -700,19 +719,20 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
             lv_label_set_text(s_kurt_status_label, "Gaussian Symmetry (Zero Spalling)");
         }
 
-        for (size_t i = 0; i < 40; i++) {
-            size_t idx = (i * osc_count) / 40;
-            int32_t val = (int32_t)(fabsf(osc_waveform[idx]) * 100.0f);
+        for (size_t i = 0; i < 36; i++) {
+            int32_t val = (int32_t)((s_smooth_kurt / 8.0f) * 100.0f);
+            if (val > 100) val = 100;
             lv_chart_set_value_by_id(s_kurt_chart, s_kurt_series, i, val);
         }
+        lv_chart_refresh(s_kurt_chart);
     }
 
     // VIEW 4: TRIPLE ACTIVITY RINGS
     else if (s_current_view == VIEW_TRIPLE_ACTIVITY_RINGS) {
         lv_arc_set_value(s_ring_red, metrics->health_score);
-        int bearing_val = (metrics->kurtosis > 5.0f) ? 30 : (metrics->kurtosis > 3.8f) ? 65 : 95;
+        int bearing_val = (s_smooth_kurt > 5.0f) ? 30 : (s_smooth_kurt > 3.8f) ? 65 : 95;
         lv_arc_set_value(s_ring_green, bearing_val);
-        int balance_val = (metrics->rms_acceleration_g > 0.3f) ? 25 : (metrics->rms_acceleration_g > 0.15f) ? 60 : 98;
+        int balance_val = (s_smooth_rms > 0.3f) ? 25 : (s_smooth_rms > 0.15f) ? 60 : 98;
         lv_arc_set_value(s_ring_blue, balance_val);
 
         snprintf(buf, sizeof(buf), "%d%%", metrics->health_score);
@@ -728,8 +748,8 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
 
     // VIEW 6: ROTATION TACHOMETER
     else if (s_current_view == VIEW_ROTATION_TACHOMETER) {
-        lv_arc_set_value(s_tacho_arc, metrics->estimated_rpm);
-        snprintf(buf, sizeof(buf), "%lu\nRPM", (unsigned long)metrics->estimated_rpm);
+        lv_arc_set_value(s_tacho_arc, (int32_t)s_smooth_rpm);
+        snprintf(buf, sizeof(buf), "%lu\nRPM", (unsigned long)s_smooth_rpm);
         lv_label_set_text(s_tacho_rpm_label, buf);
     }
 
@@ -737,7 +757,7 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
     else if (s_current_view == VIEW_FLUID_ENERGY_TANK) {
         snprintf(buf, sizeof(buf), "ISO VELOCITY: %.2f mm/s", metrics->iso_vibration_vel);
         lv_label_set_text(s_fluid_val_label, buf);
-        int f_val = (int)(metrics->rms_acceleration_g * 180.0f);
+        int f_val = (int)(s_smooth_rms * 180.0f);
         if (f_val > 100) f_val = 100;
         lv_bar_set_value(s_fluid_bar, f_val, LV_ANIM_OFF);
 
@@ -760,7 +780,7 @@ void ui_engine_update(const DiagnosticMetrics* metrics, const float* osc_wavefor
     // VIEW 9: 24H DOT MATRIX HEATMAP
     else if (s_current_view == VIEW_DOT_MATRIX_HEATMAP) {
         for (int i = 0; i < 24; i++) {
-            if (i % 7 == 0 && metrics->rms_acceleration_g > 0.2f) {
+            if (i % 7 == 0 && s_smooth_rms > 0.2f) {
                 lv_obj_set_style_bg_color(s_matrix_dots[i], lv_color_hex(0xFF2A54), LV_PART_MAIN);
             } else {
                 lv_obj_set_style_bg_color(s_matrix_dots[i], lv_color_hex(0x0C331E), LV_PART_MAIN);

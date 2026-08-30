@@ -14,7 +14,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
   telemetry,
   machine
 }) => {
-  const [activeMode, setActiveMode] = useState<"classic" | "multiaxis" | "kurtosis">("classic");
+  const [activeMode, setActiveMode] = useState<"classic" | "multiaxis">("classic");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveHistoryRef = useRef<number[]>(new Array(240).fill(0));
@@ -23,6 +23,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
   const fftHistoryRef = useRef<number[]>(new Array(28).fill(0.05));
   const fftPeaksRef = useRef<number[]>(new Array(28).fill(0.05));
   const phaseRef = useRef<number>(0);
+  const smoothedRmsRef = useRef<number>(0.082);
 
   const isFault = telemetry.score < 50;
 
@@ -57,42 +58,33 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       ctx.lineTo(w, midY);
       ctx.stroke();
 
+      // Smooth EMA low-pass for telemetry.rms to prevent visual jitter
+      smoothedRmsRef.current = smoothedRmsRef.current * 0.90 + (telemetry.rms || 0.082) * 0.10;
+
       // Dynamic Angular Phase Speed driven by fundamental frequency
       const displayHz = telemetry.f0 > 1.0 ? telemetry.f0 : targetHz;
-      const freqMultiplier = Math.max(0.08, Math.min(0.25, displayHz / 280.0));
+      const freqMultiplier = Math.max(0.08, Math.min(0.20, displayHz / 300.0));
       phaseRef.current += freqMultiplier;
 
-      // Scale dynamic amplitude relative to custom warning limit
-      const normRms = telemetry.rms / Math.max(0.05, warnRms);
-      const rmsAmp = Math.max(0.18, Math.min(1.2, normRms * 0.45));
-      const noise = (Math.random() - 0.5) * (0.02 + telemetry.kurt * 0.008);
+      // Smooth dynamic amplitude
+      const normRms = smoothedRmsRef.current / Math.max(0.05, warnRms);
+      const rmsAmp = Math.max(0.18, Math.min(1.1, normRms * 0.45));
 
-      let sampleX = 0;
-      let sampleY = 0;
-      let sampleZ = 0;
+      let sampleX = rmsAmp * Math.sin(phaseRef.current);
+      let sampleY = rmsAmp * 0.72 * Math.sin(phaseRef.current + 1.2);
+      let sampleZ = rmsAmp * 0.82 * Math.sin(phaseRef.current + 2.4);
 
-      if (telemetry.state === 1) {
-        // Nominal: ultra smooth harmonic sine wave
-        sampleX = rmsAmp * Math.sin(phaseRef.current) + noise;
-        sampleY = rmsAmp * 0.7 * Math.sin(phaseRef.current + 1.2) + noise * 0.8;
-        sampleZ = rmsAmp * 0.8 * Math.sin(phaseRef.current + 2.4) + noise * 0.8;
-      } else if (telemetry.state === 3) {
-        // Rotor unbalance / resonance: high 1X harmonic modulation
-        const mod = 1.0 + 0.35 * Math.sin(phaseRef.current * 0.25);
-        sampleX = rmsAmp * 1.6 * Math.sin(phaseRef.current) * mod + 0.35 * Math.sin(phaseRef.current * 2) + noise * 2;
-        sampleY = rmsAmp * 1.1 * Math.sin(phaseRef.current + 1.4) + noise * 1.5;
-        sampleZ = rmsAmp * 1.3 * Math.sin(phaseRef.current + 2.8) + noise * 1.5;
+      if (telemetry.state === 3) {
+        // Rotor unbalance: harmonic 1X swell
+        const mod = 1.0 + 0.25 * Math.sin(phaseRef.current * 0.2);
+        sampleX = rmsAmp * 1.5 * Math.sin(phaseRef.current) * mod;
+        sampleY = rmsAmp * 1.1 * Math.sin(phaseRef.current + 1.4);
+        sampleZ = rmsAmp * 1.25 * Math.sin(phaseRef.current + 2.8);
       } else if (telemetry.state === 4) {
-        // Bearing spalling / impulsive shock: sudden micro-peaks
-        const isImpact = Math.random() < 0.14;
-        const impactSpike = isImpact ? (Math.random() > 0.5 ? 1.8 : -1.8) * rmsAmp * 2.2 : 0;
-        sampleX = rmsAmp * Math.sin(phaseRef.current) + impactSpike + noise * 3;
-        sampleY = rmsAmp * 0.7 * Math.sin(phaseRef.current + 1.2) + impactSpike * 0.7 + noise * 2;
-        sampleZ = rmsAmp * 0.85 * Math.sin(phaseRef.current + 2.4) + impactSpike * 0.85 + noise * 2;
-      } else {
-        sampleX = rmsAmp * Math.sin(phaseRef.current) + noise;
-        sampleY = rmsAmp * 0.75 * Math.sin(phaseRef.current + 1.2) + noise;
-        sampleZ = rmsAmp * 0.85 * Math.sin(phaseRef.current + 2.4) + noise;
+        // Bearing spalling / impulsive shock
+        sampleX = rmsAmp * (Math.sin(phaseRef.current) + 0.3 * Math.sin(phaseRef.current * 4));
+        sampleY = rmsAmp * (0.75 * Math.sin(phaseRef.current + 1.2) + 0.2 * Math.sin(phaseRef.current * 4));
+        sampleZ = rmsAmp * (0.85 * Math.sin(phaseRef.current + 2.4) + 0.25 * Math.sin(phaseRef.current * 4));
       }
 
       waveHistoryRef.current.shift();
@@ -112,13 +104,13 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
 
       for (let i = 0; i < BARS; i++) {
         let target = (telemetry.visualSpectrum[i % telemetry.visualSpectrum.length] || 0.05);
-        if (telemetry.state === 3 && i === 4) target = 0.95;
+        if (telemetry.state === 3 && i === 4) target = 0.92;
 
-        fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.8 + target * 0.2;
+        fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.88 + target * 0.12;
         if (fftHistoryRef.current[i] > fftPeaksRef.current[i]) {
           fftPeaksRef.current[i] = fftHistoryRef.current[i];
         } else {
-          fftPeaksRef.current[i] = Math.max(0, fftPeaksRef.current[i] - 0.012);
+          fftPeaksRef.current[i] = Math.max(0, fftPeaksRef.current[i] - 0.008);
         }
 
         const bx = i * (barWidth + 6);
@@ -138,12 +130,11 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       // 2. Draw Smooth Glowing Sine Waves
       // -------------------------------------------------------------
       if (activeMode === "multiaxis") {
-        // Multi-Axial Waves (Red, Green, Cyan)
         const renderTrace = (pts: number[], color: string, shadow: string, width: number) => {
           ctx.save();
           ctx.strokeStyle = color;
           ctx.shadowColor = shadow;
-          ctx.shadowBlur = 10;
+          ctx.shadowBlur = 8;
           ctx.lineWidth = width;
           ctx.beginPath();
           for (let i = 0; i < pts.length; i++) {
@@ -156,17 +147,17 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
           ctx.restore();
         };
 
-        renderTrace(waveHistoryZRef.current, "#FF2A54", "rgba(255, 42, 84, 0.6)", 2.0);
-        renderTrace(waveHistoryYRef.current, "#00FF66", "rgba(0, 255, 102, 0.6)", 2.0);
-        renderTrace(waveHistoryRef.current, "#00F0FF", "rgba(0, 240, 255, 0.9)", 3.0);
+        renderTrace(waveHistoryZRef.current, "#FF2A54", "rgba(255, 42, 84, 0.5)", 2.0);
+        renderTrace(waveHistoryYRef.current, "#00FF66", "rgba(0, 255, 102, 0.5)", 2.0);
+        renderTrace(waveHistoryRef.current, "#00F0FF", "rgba(0, 240, 255, 0.8)", 3.0);
       } else {
-        // Classic Ultra-Smooth Single Sine Wave (Sky Cyan or Amber/Rose on Fault)
+        // Classic Ultra-Smooth Single Sine Wave
         const traceColor = isFault ? "#F43F5E" : "#0EA5E9";
         ctx.save();
         ctx.strokeStyle = traceColor;
         ctx.lineWidth = 3.0;
         ctx.shadowColor = traceColor;
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = 10;
         ctx.beginPath();
 
         const points = waveHistoryRef.current;
