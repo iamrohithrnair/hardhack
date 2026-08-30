@@ -3,14 +3,20 @@
 import React from "react";
 import { Clock, Activity, Zap } from "lucide-react";
 import { TelemetryData } from "../hooks/useDeviceStream";
+import { MachineProfile } from "../types/machine";
 
 interface HeroSectionProps {
   telemetry: TelemetryData;
+  machine: MachineProfile;
 }
 
-export const HeroSection: React.FC<HeroSectionProps> = ({ telemetry }) => {
+export const HeroSection: React.FC<HeroSectionProps> = ({ telemetry, machine }) => {
   const isHealthy = telemetry.score >= 70;
   const isCritical = telemetry.score < 30;
+
+  // Real or machine-configured RPM
+  const displayRPM = telemetry.rpm > 300 ? telemetry.rpm : machine.nominalRPM;
+  const displayFreq = telemetry.f0 > 5 ? telemetry.f0 : machine.fundamentalHz;
 
   return (
     <section className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 mt-1">
@@ -18,7 +24,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ telemetry }) => {
       <div className="flex flex-col gap-4 flex-1">
         <h1 className="text-3xl font-extrabold tracking-tight text-[#12141A]">
           Diagnostic Center,{" "}
-          <span className="text-[#6B7280] font-semibold">Desk Fan 01</span>
+          <span className="text-[#6B7280] font-semibold">{machine.name}</span>
         </h1>
 
         <div className="flex flex-wrap items-center gap-2 bg-black/[0.04] p-1.5 rounded-full max-w-2xl border border-black/5">
@@ -53,7 +59,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ telemetry }) => {
             className="flex items-center justify-between px-3.5 py-1.5 rounded-full text-[11px] font-semibold bg-white text-[#6B7280] border border-black/5 shadow-xs"
             style={{ minWidth: "120px" }}
           >
-            <span>ISO-10816</span>
+            <span>{machine.isoClass}</span>
             <span
               className={`font-bold ${
                 telemetry.iso < 1.12
@@ -93,7 +99,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ telemetry }) => {
           </div>
           <div className="flex flex-col">
             <span className="text-2xl font-extrabold tracking-tight font-mono text-[#12141A]">
-              {telemetry.rpm.toLocaleString()}
+              {displayRPM.toLocaleString()}
             </span>
             <span className="text-[11px] text-[#6B7280] font-semibold">
               Rotor RPM
@@ -108,7 +114,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ telemetry }) => {
           </div>
           <div className="flex flex-col">
             <span className="text-2xl font-extrabold tracking-tight font-mono text-[#12141A]">
-              {telemetry.f0.toFixed(1)}
+              {displayFreq.toFixed(1)}
             </span>
             <span className="text-[11px] text-[#6B7280] font-semibold">
               Freq (Hz)

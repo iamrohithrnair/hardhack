@@ -65,7 +65,8 @@ static esp_err_t imu_init_board(void) {
     qmi8658_set_accel_odr(&s_imu, QMI8658_ACCEL_ODR_250HZ);
     qmi8658_set_gyro_range(&s_imu, QMI8658_GYRO_RANGE_256DPS);
     qmi8658_set_gyro_odr(&s_imu, QMI8658_GYRO_ODR_250HZ);
-    qmi8658_set_accel_unit_mps2(&s_imu, false); // in g
+    qmi8658_set_accel_unit_mps2(&s_imu, true); // in m/s^2
+    qmi8658_set_gyro_unit_dps(&s_imu, true);
     qmi8658_enable_sensors(&s_imu, QMI8658_ENABLE_ACCEL | QMI8658_ENABLE_GYRO);
 
     s_imu_ready = true;
@@ -75,21 +76,30 @@ static esp_err_t imu_init_board(void) {
 static void imu_sampler_task(void *arg) {
     TickType_t last_wake = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(IMU_SAMPLE_PERIOD_MS);
+    static float dc_x = 0.0f, dc_y = 0.0f, dc_z = 0.0f;
 
     while (true) {
         float sample = 0.0f;
         if (s_imu_ready) {
-            bool ready = false;
-            qmi8658_is_data_ready(&s_imu, &ready);
-            if (ready) {
-                qmi8658_data_t data = {0};
-                if (qmi8658_read_sensor_data(&s_imu, &data) == ESP_OK) {
-                    // Scale from milli-g to g-force
-                    float gx = data.accelX / 1000.0f;
-                    float gy = data.accelY / 1000.0f;
-                    float gz = data.accelZ / 1000.0f;
-                    sample = sqrtf(gx * gx + gy * gy + gz * gz) - 1.0f;
-                }
+            qmi8658_data_t data = {0};
+            if (qmi8658_read_sensor_data(&s_imu, &data) == ESP_OK) {
+                // Acceleration in m/s^2 converted to g (1g = 9.80665 m/s^2)
+                float gx = data.accelX / 9.80665f;
+                float gy = data.accelY / 9.80665f;
+                float gz = data.accelZ / 9.80665f;
+
+                // High-pass filter to extract pure AC micro-vibrations
+                dc_x = 0.98f * dc_x + 0.02f * gx;
+                dc_y = 0.98f * dc_y + 0.02f * gy;
+                dc_z = 0.98f * dc_z + 0.02f * gz;
+
+                float ac_x = gx - dc_x;
+                float ac_y = gy - dc_y;
+                float ac_z = gz - dc_z;
+
+                // Total dynamic vibration AC magnitude
+                float dyn = sqrtf(ac_x * ac_x + ac_y * ac_y + ac_z * ac_z);
+                sample = (ac_z >= 0.0f) ? dyn : -dyn;
             }
         }
 
