@@ -136,10 +136,10 @@ export default function DashboardPage() {
             </main>
 
             {/* Bottom Timeline & Real-Time Oscilloscope Card */}
-            <OscilloscopeTimelineCard telemetry={telemetry} />
+            <OscilloscopeTimelineCard telemetry={telemetry} machine={currentMachine} />
 
             {/* Sensor Chart Studio (10 Real-Time Graph Styles) */}
-            <GraphGalleryStudio telemetry={telemetry} />
+            <GraphGalleryStudio telemetry={telemetry} machine={currentMachine} />
           </div>
         )}
 

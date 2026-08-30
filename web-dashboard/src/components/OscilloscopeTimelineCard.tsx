@@ -2,14 +2,17 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { TelemetryData } from "../hooks/useDeviceStream";
-import { Activity, Waves, BarChart3, Zap, ShieldAlert, Sparkles } from "lucide-react";
+import { MachineProfile } from "../types/machine";
+import { Activity, Waves, BarChart3, Zap, ShieldAlert, Sparkles, Sliders } from "lucide-react";
 
 interface OscilloscopeTimelineCardProps {
   telemetry: TelemetryData;
+  machine: MachineProfile;
 }
 
 export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> = ({
-  telemetry
+  telemetry,
+  machine
 }) => {
   const [activeView, setActiveView] = useState<"sine" | "fft" | "kurtosis">("sine");
 
@@ -22,6 +25,13 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
   const phaseRef = useRef<number>(0);
 
   const isCritical = telemetry.score < 30;
+
+  // Custom asset parameters
+  const targetHz = machine.fundamentalHz || 48.5;
+  const warnRms = machine.warningRms || 0.25;
+  const critRms = machine.criticalRms || 0.85;
+  const kurtThresh = machine.kurtosisThreshold || 4.0;
+  const targetType = machine.detectionTarget || "vibration";
 
   useEffect(() => {
     let animationFrameId: number;
@@ -56,33 +66,36 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
         ctx.stroke();
       }
 
-      // Update Phase
-      const freqMultiplier = Math.max(0.06, (telemetry.f0 || 48.5) / 280.0);
+      // Dynamic angular frequency and phase proportional to asset fundamental frequency
+      const displayHz = telemetry.f0 > 1.0 ? telemetry.f0 : targetHz;
+      const freqMultiplier = Math.max(0.04, Math.min(0.4, displayHz / 250.0));
       phaseRef.current += freqMultiplier;
 
-      const rmsAmp = Math.max(0.15, Math.min(1.4, telemetry.rms * 6.5));
-      const noise = (Math.random() - 0.5) * (0.04 + telemetry.kurt * 0.01);
+      // Amplitude scaled relative to asset's custom warning threshold
+      const normalizedRms = telemetry.rms / Math.max(0.05, warnRms);
+      const rmsAmp = Math.max(0.12, Math.min(1.4, normalizedRms * 0.8));
+      const noise = (Math.random() - 0.5) * (0.03 + (telemetry.kurt / kurtThresh) * 0.02);
 
-      // Calculate 3-Axis Multi-Chromatic Sine Wave Signals
+      // 3-Axis Multi-Chromatic Signals
       let sampleX = 0;
       let sampleY = 0;
       let sampleZ = 0;
 
       if (telemetry.state === 1) {
-        // Nominal
+        // Nominal Harmonic
         sampleX = rmsAmp * Math.sin(phaseRef.current) + noise;
         sampleY = rmsAmp * 0.75 * Math.sin(phaseRef.current + 1.2) + noise * 0.8;
         sampleZ = rmsAmp * 0.85 * Math.sin(phaseRef.current + 2.4) + noise * 0.9;
       } else if (telemetry.state === 3) {
-        // Unbalance
+        // Unbalance / Resonance
         const mod = 1.0 + 0.4 * Math.sin(phaseRef.current * 0.25);
         sampleX = rmsAmp * 1.8 * Math.sin(phaseRef.current) * mod + 0.4 * Math.sin(phaseRef.current * 2) + noise * 2;
         sampleY = rmsAmp * 1.2 * Math.sin(phaseRef.current + 1.5) + noise * 1.5;
         sampleZ = rmsAmp * 1.4 * Math.sin(phaseRef.current + 3.0) + noise * 1.5;
       } else if (telemetry.state === 4) {
-        // Bearing spalling impact spikes
+        // Impact Shock
         const isImpact = Math.random() < 0.12;
-        const impactSpike = isImpact ? (Math.random() > 0.5 ? 1.9 : -1.9) * rmsAmp * 2.5 : 0;
+        const impactSpike = isImpact ? (Math.random() > 0.5 ? 2.0 : -2.0) * rmsAmp * 2.5 : 0;
         sampleX = rmsAmp * Math.sin(phaseRef.current) + impactSpike + noise * 3;
         sampleY = rmsAmp * 0.7 * Math.sin(phaseRef.current + 1.2) + impactSpike * 0.7 + noise * 2;
         sampleZ = rmsAmp * 0.9 * Math.sin(phaseRef.current + 2.4) + impactSpike * 0.9 + noise * 2;
@@ -107,10 +120,9 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       kurtosisHistoryRef.current.shift();
 
       // -------------------------------------------------------------
-      // RENDER 1: MULTI-CHROMATIC GLOWING SINE WAVES
+      // RENDER 1: MULTI-CHROMATIC SINE WAVES
       // -------------------------------------------------------------
       if (activeView === "sine") {
-        // Center guideline
         ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
@@ -119,6 +131,18 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
         ctx.lineTo(w, midY);
         ctx.stroke();
         ctx.setLineDash([]);
+
+        // Upper & Lower Warning Threshold Guides
+        const warnYTop = midY - (h * 0.32);
+        const warnYBot = midY + (h * 0.32);
+        ctx.strokeStyle = "rgba(245, 197, 68, 0.25)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, warnYTop);
+        ctx.lineTo(w, warnYTop);
+        ctx.moveTo(0, warnYBot);
+        ctx.lineTo(w, warnYBot);
+        ctx.stroke();
 
         const renderWaveTrace = (
           history: number[],
@@ -148,10 +172,10 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
         renderWaveTrace(waveHistoryZRef.current, "#FF2A54", "rgba(255, 42, 84, 0.6)", 2.5);
         // Trace 2: Lime Green (Y-Axis)
         renderWaveTrace(waveHistoryYRef.current, "#00FF66", "rgba(0, 255, 102, 0.6)", 2.5);
-        // Trace 3: Electric Cyan (X-Axis - Dominant)
+        // Trace 3: Electric Cyan (X-Axis - Dominant Lead)
         renderWaveTrace(waveHistoryXRef.current, "#00F0FF", "rgba(0, 240, 255, 0.8)", 3.5);
 
-        // Leading Glow Cursor
+        // Leading Cursor Glow
         const lastVal = waveHistoryXRef.current[waveHistoryXRef.current.length - 1];
         const cursorY = midY - lastVal * (h * 0.32);
         ctx.fillStyle = "#00F0FF";
@@ -163,7 +187,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       }
 
       // -------------------------------------------------------------
-      // RENDER 2: 24-BAND FFT SPECTRUM EQUALIZER
+      // RENDER 2: 24-BAND FFT SPECTRUM
       // -------------------------------------------------------------
       else if (activeView === "fft") {
         const barCount = 24;
@@ -173,13 +197,12 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
           const x = 8 + i * (barW + 8);
           
           let target = (telemetry.visualSpectrum[i % telemetry.visualSpectrum.length] || 0.1);
-          if (telemetry.state === 3 && i === 4) target = 0.95; // 1X Harmonic peak
+          if (telemetry.state === 3 && i === 4) target = 0.95;
 
           fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.8 + target * 0.2;
           const barH = fftHistoryRef.current[i] * (h * 0.78);
           const y = h - barH - 24;
 
-          // Rainbow Gradient Bar Color
           const grad = ctx.createLinearGradient(0, h, 0, y);
           if (i > 18) {
             grad.addColorStop(0, "#FF2A54");
@@ -200,18 +223,17 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
           ctx.roundRect(x, y, barW, barH, [4, 4, 0, 0]);
           ctx.fill();
 
-          // Peak Marker Dot
           ctx.fillStyle = "#FFFFFF";
           ctx.fillRect(x, y - 4, barW, 2);
         }
       }
 
       // -------------------------------------------------------------
-      // RENDER 3: KURTOSIS IMPACT TIMELINE CHART
+      // RENDER 3: KURTOSIS IMPACT TIMELINE
       // -------------------------------------------------------------
       else if (activeView === "kurtosis") {
-        // Threshold line at Kurtosis = 4.0
-        const threshY = h - (4.0 / 8.0) * h;
+        const maxK = Math.max(8.0, kurtThresh * 1.5);
+        const threshY = h - (kurtThresh / maxK) * h;
         ctx.strokeStyle = "#FF2A54";
         ctx.lineWidth = 1.5;
         ctx.setLineDash([6, 6]);
@@ -223,12 +245,11 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
 
         ctx.fillStyle = "#FF2A54";
         ctx.font = "10px monospace";
-        ctx.fillText("SHOCK THRESHOLD (κ = 4.0)", 10, threshY - 6);
+        ctx.fillText(`ANOMALY THRESHOLD (κ = ${kurtThresh.toFixed(1)})`, 10, threshY - 6);
 
-        // Kurtosis Area & Line
         ctx.save();
-        ctx.strokeStyle = telemetry.kurt > 4.0 ? "#FF2A54" : "#00FF66";
-        ctx.shadowColor = telemetry.kurt > 4.0 ? "rgba(255, 42, 84, 0.8)" : "rgba(0, 255, 102, 0.8)";
+        ctx.strokeStyle = telemetry.kurt > kurtThresh ? "#FF2A54" : "#00FF66";
+        ctx.shadowColor = telemetry.kurt > kurtThresh ? "rgba(255, 42, 84, 0.8)" : "rgba(0, 255, 102, 0.8)";
         ctx.shadowBlur = 10;
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -237,7 +258,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
         for (let i = 0; i < kurtosisHistoryRef.current.length; i++) {
           const val = kurtosisHistoryRef.current[i];
           const x = i * step;
-          const y = h - (val / 8.0) * (h * 0.85) - 20;
+          const y = h - (val / maxK) * (h * 0.85) - 20;
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -251,7 +272,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
     render();
 
     return () => cancelAnimationFrame(animationFrameId);
-  }, [activeView, telemetry.f0, telemetry.kurt, telemetry.rms, telemetry.score, telemetry.state, telemetry.visualSpectrum]);
+  }, [activeView, critRms, kurtThresh, targetHz, targetType, telemetry.f0, telemetry.kurt, telemetry.rms, telemetry.score, telemetry.state, telemetry.visualSpectrum, warnRms]);
 
   return (
     <div className="bg-[#12141A] text-white p-6 rounded-[32px] border border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.25)] flex flex-col gap-5 relative overflow-hidden">
@@ -262,12 +283,17 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
             <Waves className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-              Micro-Vibration Transducer Stream
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            </h3>
-            <p className="text-xs text-neutral-400 font-mono">
-              250 Hz High-Speed Telemetry · 3-Axis Accelerometer + Stethoscope
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                {machine.name} Live Stream
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              </h3>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 text-[#F5C544] font-bold uppercase">
+                {machine.detectionTarget || "VIBRATION"}
+              </span>
+            </div>
+            <p className="text-xs text-neutral-400 font-mono mt-0.5">
+              250 Hz High-Speed Telemetry · Target Fundamental: {targetHz} Hz · Baseline: {warnRms}g RMS
             </p>
           </div>
         </div>
@@ -283,7 +309,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
             }`}
           >
             <Waves className="w-3.5 h-3.5" />
-            1. Sine Waves (X/Y/Z)
+            1. Tri-Axial Waves
           </button>
           <button
             onClick={() => setActiveView("fft")}
@@ -336,12 +362,12 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
           )}
           {activeView === "fft" && (
             <span className="text-[#F5C544]">
-              Fundamental F0: {(telemetry.f0 || 48.5).toFixed(1)} Hz · 1X/2X/3X Harmonic Peaks
+              Fundamental F0: {(telemetry.f0 || targetHz).toFixed(1)} Hz · Harmonics of {machine.name}
             </span>
           )}
           {activeView === "kurtosis" && (
-            <span className={telemetry.kurt > 4.0 ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>
-              Current Kurtosis: {telemetry.kurt.toFixed(2)} (Gaussian Baseline = 3.0)
+            <span className={telemetry.kurt > kurtThresh ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>
+              Current Kurtosis: {telemetry.kurt.toFixed(2)} (Threshold: {kurtThresh.toFixed(1)})
             </span>
           )}
         </div>
@@ -352,25 +378,27 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
         <div className="bg-[#161B24] p-3 rounded-2xl border border-white/5 flex flex-col">
           <span className="text-neutral-400 text-[10px]">RMS ACCELERATION</span>
           <strong className="text-lg font-bold text-[#F5C544]">
-            {telemetry.rms.toFixed(3)}g
+            {telemetry.rms.toFixed(3)}g{" "}
+            <span className="text-[10px] text-neutral-400 font-normal">/ {warnRms}g lim</span>
           </strong>
         </div>
         <div className="bg-[#161B24] p-3 rounded-2xl border border-white/5 flex flex-col">
           <span className="text-neutral-400 text-[10px]">FUNDAMENTAL FREQ</span>
           <strong className="text-lg font-bold text-[#00F0FF]">
-            {(telemetry.f0 || 48.5).toFixed(1)} Hz
+            {(telemetry.f0 || targetHz).toFixed(1)} Hz
           </strong>
         </div>
         <div className="bg-[#161B24] p-3 rounded-2xl border border-white/5 flex flex-col">
           <span className="text-neutral-400 text-[10px]">KURTOSIS FACTOR</span>
-          <strong className={`text-lg font-bold ${telemetry.kurt > 4.0 ? "text-rose-400" : "text-emerald-400"}`}>
-            {telemetry.kurt.toFixed(2)}
+          <strong className={`text-lg font-bold ${telemetry.kurt > kurtThresh ? "text-rose-400" : "text-emerald-400"}`}>
+            {telemetry.kurt.toFixed(2)}{" "}
+            <span className="text-[10px] text-neutral-400 font-normal">/ &lt;{kurtThresh}</span>
           </strong>
         </div>
         <div className="bg-[#161B24] p-3 rounded-2xl border border-white/5 flex flex-col">
           <span className="text-neutral-400 text-[10px]">ISO VIBRATION VELOCITY</span>
           <strong className="text-lg font-bold text-white">
-            {telemetry.iso.toFixed(2)} mm/s
+            {telemetry.iso.toFixed(2)} mm/s ({machine.isoClass})
           </strong>
         </div>
       </div>

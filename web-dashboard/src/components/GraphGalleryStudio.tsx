@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { TelemetryData } from "../hooks/useDeviceStream";
+import { MachineProfile } from "../types/machine";
 import { 
   Activity, 
   BarChart3, 
@@ -19,9 +20,13 @@ import {
 
 interface GraphGalleryStudioProps {
   telemetry: TelemetryData;
+  machine: MachineProfile;
 }
 
-export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetry }) => {
+export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({
+  telemetry,
+  machine
+}) => {
   const [selectedStyle, setSelectedStyle] = useState<number>(0);
   const canvasECGRef = useRef<HTMLCanvasElement | null>(null);
   const canvasWaveRef = useRef<HTMLCanvasElement | null>(null);
@@ -29,6 +34,15 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
   const phaseRef = useRef<number>(0);
 
   const isFault = telemetry.score < 50;
+
+  // Custom asset parameters
+  const targetHz = machine.fundamentalHz || 48.5;
+  const nominalRpm = machine.nominalRPM || Math.round(targetHz * 60);
+  const warnRms = machine.warningRms || 0.25;
+  const critRms = machine.criticalRms || 0.85;
+  const kurtThresh = machine.kurtosisThreshold || 4.0;
+  const isRotational = machine.nominalRPM > 0;
+  const targetType = machine.detectionTarget || "vibration";
 
   // Real-time canvas animation loop
   useEffect(() => {
@@ -85,7 +99,8 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
           ctx.fillStyle = "#0C0E14";
           ctx.fillRect(0, 0, cvs.width, cvs.height);
 
-          const fillHeight = Math.min(cvs.height * 0.85, Math.max(cvs.height * 0.2, (telemetry.rms * 300) + 40));
+          const normRms = telemetry.rms / Math.max(0.05, warnRms);
+          const fillHeight = Math.min(cvs.height * 0.88, Math.max(cvs.height * 0.18, (normRms * cvs.height * 0.4) + 30));
           const baseWaterY = cvs.height - fillHeight;
 
           // Wave 1 (Deep Blue)
@@ -123,7 +138,7 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
           ctx.fillRect(0, 0, cvs.width, cvs.height);
 
           const midY = cvs.height / 2;
-          const amp = Math.max(10, Math.min(50, telemetry.rms * 120));
+          const amp = Math.max(10, Math.min(50, (telemetry.rms / Math.max(0.05, warnRms)) * 30));
 
           // Spline 1: Max Envelope (Red / Coral)
           ctx.strokeStyle = "#FF2A54";
@@ -159,7 +174,7 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
 
     draw();
     return () => cancelAnimationFrame(animId);
-  }, [isFault, telemetry.rms]);
+  }, [isFault, telemetry.rms, warnRms]);
 
   const STYLES_LIST = [
     { id: 0, title: "1. Goal Pillars", icon: BarChart3, color: "text-amber-400" },
@@ -184,9 +199,12 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
             <h2 className="text-xl font-bold text-white tracking-tight">
               Sensor Chart Studio (10 Real-Time Diagnostic Styles)
             </h2>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-sky-500/20 text-sky-400 font-bold uppercase">
+              {machine.name}
+            </span>
           </div>
           <p className="text-xs text-neutral-400 font-medium mt-1">
-            Inspired by Apple Watch luxury dark aesthetics. All graphs mirror live ESP32-S3 sensor streams and can be cycled on hardware via the BOOT switch.
+            Inspired by Apple Watch luxury dark aesthetics. All graphs dynamically calibrate to <strong>{machine.name}</strong> ({targetType.toUpperCase()}) and can be cycled on hardware via the BOOT switch.
           </p>
         </div>
 
@@ -226,21 +244,21 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
           <div className="flex flex-col gap-4 animate-fade-in">
             <div className="flex justify-between items-center">
               <span className="text-xs font-bold text-[#F5C544] uppercase tracking-wider font-mono">
-                1. Harmonic Energy Goal Pillars (1X - 7X Fundamental Orders)
+                1. Harmonic Energy Goal Pillars (1X - 7X Orders of {targetHz} Hz)
               </span>
-              <span className="text-xs font-mono text-neutral-400">Target Line: 0.25g ISO Limit</span>
+              <span className="text-xs font-mono text-neutral-400">Target Warning Line: {warnRms}g RMS</span>
             </div>
             <div className="flex justify-around items-end h-44 bg-[#0C0E14] p-4 rounded-2xl border border-white/5 relative">
               {/* Threshold guideline */}
               <div className="absolute top-14 left-0 right-0 border-b border-dashed border-rose-500/60 pointer-events-none" />
               {[
-                { order: "1X", val: Math.min(100, (telemetry.rms * 180)), color: "bg-[#F5C544]" },
-                { order: "2X", val: Math.min(100, (telemetry.rms * 90) + 15), color: "bg-orange-500" },
-                { order: "3X", val: Math.min(100, (telemetry.rms * 60) + 10), color: "bg-amber-500" },
-                { order: "4X", val: Math.min(100, (telemetry.rms * 45) + 8), color: "bg-yellow-600" },
-                { order: "5X", val: Math.min(100, (telemetry.rms * 30) + 6), color: "bg-emerald-500" },
-                { order: "6X", val: Math.min(100, (telemetry.rms * 25) + 5), color: "bg-cyan-500" },
-                { order: "7X", val: Math.min(100, (telemetry.rms * 20) + 4), color: "bg-sky-500" }
+                { order: `1X (${targetHz}Hz)`, val: Math.min(100, (telemetry.rms / warnRms) * 75), color: "bg-[#F5C544]" },
+                { order: `2X (${(targetHz * 2).toFixed(1)}Hz)`, val: Math.min(100, (telemetry.rms / warnRms) * 45 + 15), color: "bg-orange-500" },
+                { order: `3X (${(targetHz * 3).toFixed(1)}Hz)`, val: Math.min(100, (telemetry.rms / warnRms) * 30 + 10), color: "bg-amber-500" },
+                { order: `4X (${(targetHz * 4).toFixed(1)}Hz)`, val: Math.min(100, (telemetry.rms / warnRms) * 22 + 8), color: "bg-yellow-600" },
+                { order: `5X (${(targetHz * 5).toFixed(1)}Hz)`, val: Math.min(100, (telemetry.rms / warnRms) * 18 + 6), color: "bg-emerald-500" },
+                { order: `6X (${(targetHz * 6).toFixed(1)}Hz)`, val: Math.min(100, (telemetry.rms / warnRms) * 14 + 5), color: "bg-cyan-500" },
+                { order: `7X (${(targetHz * 7).toFixed(1)}Hz)`, val: Math.min(100, (telemetry.rms / warnRms) * 10 + 4), color: "bg-sky-500" }
               ].map((p, idx) => (
                 <div key={idx} className="flex flex-col items-center gap-2 h-full justify-end">
                   <span className="text-[10px] font-mono text-neutral-400">{p.val.toFixed(0)}%</span>
@@ -248,7 +266,7 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
                     className={`w-8 rounded-full ${p.color} transition-all duration-300 shadow-md`}
                     style={{ height: `${Math.max(12, p.val)}%` }}
                   />
-                  <span className="text-xs font-bold text-white font-mono">{p.order}</span>
+                  <span className="text-[11px] font-bold text-white font-mono">{p.order}</span>
                 </div>
               ))}
             </div>
@@ -262,12 +280,12 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
               <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono">
                 2. 24-Hour Spatio-Temporal Anomaly Dot Matrix Heatmap
               </span>
-              <span className="text-xs font-mono text-neutral-400">96 Continuous Observation Slices</span>
+              <span className="text-xs font-mono text-neutral-400">96 Continuous Observation Slices for {machine.name}</span>
             </div>
             <div className="grid grid-cols-12 sm:grid-cols-24 gap-1.5 p-4 bg-[#0C0E14] rounded-2xl border border-white/5">
               {Array.from({ length: 96 }).map((_, i) => {
                 const isAnomaly = i % 19 === 0 && telemetry.score < 60;
-                const isWarning = i % 7 === 0 && telemetry.rms > 0.15;
+                const isWarning = i % 7 === 0 && telemetry.rms > warnRms;
                 const color = isAnomaly
                   ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]"
                   : isWarning
@@ -292,11 +310,11 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
               <span className="text-xs font-bold text-rose-400 uppercase tracking-wider font-mono">
                 3. Segmented Multi-Band Spectral LED VU Equalizer
               </span>
-              <span className="text-xs font-mono text-neutral-400">Peak Hold: -3.2 dBFS</span>
+              <span className="text-xs font-mono text-neutral-400">Calibrated to {warnRms}g Warn / {critRms}g Crit</span>
             </div>
             <div className="flex justify-between items-end gap-1.5 h-36 bg-[#0C0E14] p-4 rounded-2xl border border-white/5">
               {Array.from({ length: 24 }).map((_, i) => {
-                const active = i < Math.round((telemetry.rms * 70) + 4);
+                const active = i < Math.round(((telemetry.rms / Math.max(0.05, warnRms)) * 14) + 4);
                 const color = i > 18 ? "bg-rose-500" : i > 12 ? "bg-amber-500" : "bg-[#F5C544]";
                 return (
                   <div
@@ -337,7 +355,7 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
                   strokeWidth="10"
                   fill="none"
                   strokeDasharray="340"
-                  strokeDashoffset={340 - (340 * (telemetry.kurt > 4 ? 45 : 94)) / 100}
+                  strokeDashoffset={340 - (340 * (telemetry.kurt > kurtThresh ? 45 : 94)) / 100}
                   strokeLinecap="round"
                   className="transition-all duration-700"
                 />
@@ -350,7 +368,7 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
                   strokeWidth="10"
                   fill="none"
                   strokeDasharray="240"
-                  strokeDashoffset={240 - (240 * (telemetry.rms > 0.2 ? 35 : 92)) / 100}
+                  strokeDashoffset={240 - (240 * (telemetry.rms > warnRms ? 35 : 92)) / 100}
                   strokeLinecap="round"
                   className="transition-all duration-700"
                 />
@@ -364,15 +382,15 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
             <div className="flex flex-col gap-3 font-mono text-xs">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#FA2C56]" />
-                <span>Overall Asset Health: <strong>{telemetry.score}%</strong></span>
+                <span>Overall {machine.name} Health: <strong>{telemetry.score}%</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#00F0FF]" />
-                <span>Bearing / Contact Integrity: <strong>{telemetry.kurt > 4 ? "Degraded" : "Nominal"}</strong></span>
+                <span>Primary Anomaly State: <strong>{telemetry.kurt > kurtThresh ? "Shock Spike" : "Nominal"}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#F5C544]" />
-                <span>Harmonic Balance: <strong>{telemetry.rms.toFixed(3)}g</strong></span>
+                <span>Harmonic Balance (Target {targetHz}Hz): <strong>{telemetry.rms.toFixed(3)}g</strong></span>
               </div>
             </div>
           </div>
@@ -399,10 +417,10 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
               </svg>
               <div className="absolute flex flex-col items-center">
                 <span className="text-3xl font-black font-mono text-white">{telemetry.score}%</span>
-                <span className="text-[10px] font-bold text-cyan-400">ISO CLASS A</span>
+                <span className="text-[10px] font-bold text-cyan-400">{machine.isoClass}</span>
               </div>
             </div>
-            <span className="text-xs text-neutral-400 font-mono">Aero-Acoustic Diagnostic Compliance Index</span>
+            <span className="text-xs text-neutral-400 font-mono">Aero-Acoustic Diagnostic Compliance Index for {machine.name}</span>
           </div>
         )}
 
@@ -418,17 +436,25 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
                   strokeWidth="12"
                   fill="none"
                   strokeDasharray="260"
-                  strokeDashoffset={260 - (260 * Math.min(4500, telemetry.rpm)) / 4500}
+                  strokeDashoffset={
+                    260 - (260 * Math.min(nominalRpm * 1.5, isRotational ? (telemetry.rpm || nominalRpm) : (telemetry.f0 * 60))) / Math.max(100, nominalRpm * 1.5)
+                  }
                   strokeLinecap="round"
                   className="transition-all duration-500"
                 />
               </svg>
               <div className="absolute flex flex-col items-center text-center">
-                <span className="text-3xl font-black font-mono text-white">{(telemetry.rpm || 2910).toLocaleString()}</span>
-                <span className="text-[10px] font-bold text-orange-400">ROTOR RPM</span>
+                <span className="text-3xl font-black font-mono text-white">
+                  {isRotational ? (telemetry.rpm || nominalRpm).toLocaleString() : (telemetry.f0 || targetHz).toFixed(1)}
+                </span>
+                <span className="text-[10px] font-bold text-orange-400">
+                  {isRotational ? "ROTOR RPM" : "FREQUENCY (HZ)"}
+                </span>
               </div>
             </div>
-            <span className="text-xs text-neutral-400 font-mono">0 to 4,500 RPM Rotational Speed Range</span>
+            <span className="text-xs text-neutral-400 font-mono">
+              0 to {isRotational ? `${(nominalRpm * 1.5).toLocaleString()} RPM` : `${(targetHz * 3).toFixed(0)} Hz`} Operational Band
+            </span>
           </div>
         )}
 
@@ -439,11 +465,13 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
               <canvas ref={canvasWaveRef} width={800} height={150} className="w-full h-full object-cover" />
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="bg-black/70 backdrop-blur-xs px-4 py-1.5 rounded-xl text-white font-mono font-bold text-sm">
-                  ENERGY DENSITY: {telemetry.iso.toFixed(2)} mm/s RMS
+                  ENERGY DENSITY: {telemetry.rms.toFixed(3)}g RMS ({telemetry.iso.toFixed(2)} mm/s)
                 </div>
               </div>
             </div>
-            <span className="text-xs text-neutral-400 font-mono text-center">Dynamic Fluid Turbulence Simulation</span>
+            <span className="text-xs text-neutral-400 font-mono text-center">
+              Dynamic Energy Density Wave Tank for {machine.name}
+            </span>
           </div>
         )}
 
@@ -454,8 +482,8 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
               <canvas ref={canvasECGRef} width={800} height={150} className="w-full h-full object-cover" />
             </div>
             <div className="flex justify-between items-center text-xs font-mono px-2">
-              <span className="text-pink-400">Acoustic Peak: {(telemetry.f0 || 48.5).toFixed(1)} Hz</span>
-              <span className="text-white">Cardiac Stethoscope Rhythm Model</span>
+              <span className="text-pink-400">Acoustic Fundamental: {(telemetry.f0 || targetHz).toFixed(1)} Hz</span>
+              <span className="text-white">{machine.motorType} Acoustic Model</span>
             </div>
           </div>
         )}
@@ -467,8 +495,8 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
               <canvas ref={canvasSplineRef} width={800} height={150} className="w-full h-full object-cover" />
             </div>
             <div className="flex justify-between items-center text-xs font-mono px-2">
-              <span className="text-rose-400">▲ Max Envelope Trace (Peak +g)</span>
-              <span className="text-cyan-400">▼ Min Envelope Trace (Peak -g)</span>
+              <span className="text-rose-400">▲ Max Envelope Trace (+g Acceleration)</span>
+              <span className="text-cyan-400">▼ Min Envelope Trace (-g Deceleration)</span>
             </div>
           </div>
         )}
@@ -476,14 +504,14 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
         {/* Style 9: Bold Diagnostics */}
         {selectedStyle === 9 && (
           <div className="flex flex-col items-center text-center gap-3 p-6 bg-[#0C0E14] rounded-2xl border border-white/5 animate-fade-in">
-            <div className="px-4 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-mono text-xs font-bold">
-              NOMINAL HARMONIC BALANCE
+            <div className="px-4 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-mono text-xs font-bold uppercase">
+              {telemetry.score >= 70 ? "NOMINAL HARMONIC BALANCE" : "ANOMALY EXCURSION DETECTED"}
             </div>
             <h3 className="text-2xl font-black text-white tracking-tight">
-              ISO 10816 CLASS A CERTIFIED
+              {machine.name.toUpperCase()} · {machine.isoClass}
             </h3>
             <p className="text-xs text-neutral-400 max-w-lg leading-relaxed">
-              Machine is operating with optimal rotational symmetry. Zero impulsive shock spikes detected (Kurtosis: {telemetry.kurt.toFixed(2)} &lt; 4.0).
+              {machine.physicsSummary || `Operating with harmonic balance. Kurtosis (${telemetry.kurt.toFixed(2)}) is tracked against threshold ${kurtThresh.toFixed(1)}.`}
             </p>
           </div>
         )}
@@ -508,11 +536,11 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
 
           <div className="flex justify-between items-baseline mt-4 pt-3 border-t border-white/5">
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-black font-mono text-white">{(telemetry.f0 || 48.5).toFixed(1)}</span>
+              <span className="text-3xl font-black font-mono text-white">{(telemetry.f0 || targetHz).toFixed(1)}</span>
               <span className="text-xs font-semibold text-neutral-400">Hz Fundamental</span>
             </div>
             <span className="text-xs font-bold text-pink-400 font-mono">
-              {telemetry.state === 1 ? "65 BPM NOMINAL" : "128 BPM IMPACT"}
+              {telemetry.state === 1 ? "NOMINAL RHYTHM" : "IMPACT CHATTER"}
             </span>
           </div>
         </div>
@@ -555,7 +583,7 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
                 strokeWidth="10"
                 fill="none"
                 strokeDasharray="340"
-                strokeDashoffset={340 - (340 * (telemetry.kurt > 4 ? 45 : 94)) / 100}
+                strokeDashoffset={340 - (340 * (telemetry.kurt > kurtThresh ? 45 : 94)) / 100}
                 strokeLinecap="round"
                 className="transition-all duration-700"
               />
@@ -569,7 +597,7 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
                 strokeWidth="10"
                 fill="none"
                 strokeDasharray="240"
-                strokeDashoffset={240 - (240 * (telemetry.rms > 0.2 ? 35 : 92)) / 100}
+                strokeDashoffset={240 - (240 * (telemetry.rms > warnRms ? 35 : 92)) / 100}
                 strokeLinecap="round"
                 className="transition-all duration-700"
               />
@@ -582,8 +610,8 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
 
           <div className="w-full flex justify-around text-center pt-2 border-t border-white/5 text-[11px] font-bold font-mono">
             <span className="text-[#FA2C56]">HEALTH: {telemetry.score}%</span>
-            <span className="text-[#00F0FF]">BEARING: {telemetry.kurt > 4 ? "FAULT" : "GOOD"}</span>
-            <span className="text-[#F5C544]">BALANCE: {telemetry.rms.toFixed(2)}g</span>
+            <span className="text-[#00F0FF]">STATE: {telemetry.kurt > kurtThresh ? "FAULT" : "GOOD"}</span>
+            <span className="text-[#F5C544]">ENERGY: {telemetry.rms.toFixed(2)}g</span>
           </div>
         </div>
 
@@ -611,7 +639,7 @@ export const GraphGalleryStudio: React.FC<GraphGalleryStudioProps> = ({ telemetr
           {/* 16-Band Segmented LED Bar */}
           <div className="flex justify-between items-end gap-1.5 h-12 bg-white/5 p-2 rounded-xl border border-white/5">
             {Array.from({ length: 16 }).map((_, i) => {
-              const active = i < Math.round(telemetry.rms * 60 + 3);
+              const active = i < Math.round(((telemetry.rms / Math.max(0.05, warnRms)) * 10) + 3);
               const color = i > 12 ? "bg-rose-500" : i > 8 ? "bg-amber-500" : "bg-[#F5C544]";
               return (
                 <div
