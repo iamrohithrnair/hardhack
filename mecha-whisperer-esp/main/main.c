@@ -128,16 +128,20 @@ void app_main(void) {
         ESP_LOGE(TAG, "Display initialization failed");
         return;
     }
-    bsp_display_brightness_set(100);
+    bsp_display_brightness_set(90);
 
     // 2. Initialize IMU
     bsp_i2c_init();
     imu_init_board();
 
     // 3. Build UI
-    if (bsp_display_lock(0)) {
+    if (bsp_display_lock(1000)) {
+        ESP_LOGI(TAG, "Initializing UI Engine...");
         ui_engine_init();
         bsp_display_unlock();
+        ESP_LOGI(TAG, "UI Engine initialized successfully");
+    } else {
+        ESP_LOGE(TAG, "Failed to acquire display lock for UI init!");
     }
 
     // 4. Start high-speed IMU sampling task on Core 0
@@ -163,7 +167,7 @@ void app_main(void) {
         const DiagnosticMetrics *metrics = dsp_engine_get_metrics();
 
         // Update UI
-        if (bsp_display_lock(0)) {
+        if (bsp_display_lock(50)) {
             ui_engine_update(metrics, s_vibration_snapshot, BUFFER_SIZE);
             bsp_display_unlock();
         }
@@ -171,7 +175,7 @@ void app_main(void) {
         // Emit Serial Telemetry
         static uint32_t last_log = 0;
         uint32_t now = esp_timer_get_time() / 1000;
-        if (now - last_log >= 200) {
+        if (now - last_log >= 100) {
             last_log = now;
             printf("{\"rpm\":%lu,\"f0\":%.1f,\"rms\":%.3f,\"kurt\":%.2f,\"iso\":%.2f,\"score\":%d,\"state\":%d}\n",
                    (unsigned long)metrics->estimated_rpm,
