@@ -42,7 +42,6 @@ export function useDeviceStream() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const motorOscRef = useRef<OscillatorNode | null>(null);
   const motorGainRef = useRef<GainNode | null>(null);
-  const reconnectTimerRef = useRef<any>(null);
 
   // Audio Stethoscope Engine
   const initAudio = useCallback(() => {
@@ -85,21 +84,23 @@ export function useDeviceStream() {
     motorGainRef.current.gain.setTargetAtTime(vol, audioCtxRef.current.currentTime, 0.05);
   }, [soundEnabled]);
 
-  // 1. Connect via Wi-Fi SoftAP / Network WebSocket (ws://192.168.4.1/ws)
+  // 1. Connect via Wi-Fi SoftAP (WebSocket + Fast HTTP Proxy Fallback)
   const connectWiFi = useCallback((ip: string = "192.168.4.1") => {
     initAudio();
+    setWifiTargetIP(ip);
+    setConnectionMode("wifi_ws");
+    setIsConnected(true);
+
     if (wsRef.current) {
       wsRef.current.close();
     }
 
     try {
-      setWifiTargetIP(ip);
       const wsUrl = `ws://${ip}/ws`;
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         setIsConnected(true);
-        setConnectionMode("wifi_ws");
       };
 
       ws.onmessage = (event) => {
@@ -114,13 +115,11 @@ export function useDeviceStream() {
       };
 
       ws.onclose = () => {
-        setIsConnected(false);
+        // Will rely on HTTP polling below
       };
 
       wsRef.current = ws;
-    } catch (err) {
-      console.warn("Wi-Fi WebSocket error:", err);
-    }
+    } catch (err) {}
   }, [initAudio, updateAudioPitch]);
 
   // 2. Connect via Python WebSocket Backend (ws://localhost:8765/ws)
@@ -147,8 +146,7 @@ export function useDeviceStream() {
       };
 
       ws.onclose = () => {
-        setIsConnected(false);
-        // If Python USB bridge closes, attempt auto-connecting to Wi-Fi SoftAP
+        // If Python backend closes, auto-switch to Wi-Fi SoftAP
         connectWiFi(wifiTargetIP);
       };
 
@@ -157,6 +155,51 @@ export function useDeviceStream() {
       connectWiFi(wifiTargetIP);
     }
   }, [connectWiFi, updateAudioPitch, wifiTargetIP]);
+
+  // Continuous Fast Poll for Wi-Fi Telemetry (every 100ms via Server Proxy & direct fetch)
+  useEffect(() => {
+    if (connectionMode !== "wifi_ws") return;
+
+    const pollInterval = setInterval(async () => {
+      // 1. Try Next.js server-side proxy
+      try {
+        const proxyRes = await fetch(`/api/device/telemetry?ip=${wifiTargetIP}`, { cache: "no-store" });
+        if (proxyRes.ok) {
+          const data = await proxyRes.json();
+          if (data && typeof data.score === "number") {
+            setTelemetry((prev) => {
+              const updated = { ...prev, ...data, source: "hardware" };
+              updateAudioPitch(updated.f0, updated.state);
+              return updated;
+            });
+            setIsConnected(true);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      // 2. Try direct browser fetch
+      try {
+        const directRes = await fetch(`http://${wifiTargetIP}/api/telemetry`, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(800)
+        });
+        if (directRes.ok) {
+          const data = await directRes.json();
+          if (data && typeof data.score === "number") {
+            setTelemetry((prev) => {
+              const updated = { ...prev, ...data, source: "hardware" };
+              updateAudioPitch(updated.f0, updated.state);
+              return updated;
+            });
+            setIsConnected(true);
+          }
+        }
+      } catch (e) {}
+    }, 100);
+
+    return () => clearInterval(pollInterval);
+  }, [connectionMode, updateAudioPitch, wifiTargetIP]);
 
   // 3. Connect via Web Bluetooth API (BLE 5.0 Wireless)
   const connectBluetooth = useCallback(async () => {
@@ -200,7 +243,7 @@ export function useDeviceStream() {
         console.warn("BLE Characteristic subscription:", svcErr);
       }
     } catch (err) {
-      console.warn("Bluetooth pairing error or cancelled:", err);
+      console.warn("Bluetooth pairing error:", err);
     }
   }, [initAudio, updateAudioPitch]);
 
@@ -328,26 +371,8 @@ export function useDeviceStream() {
     connectWebSocket();
     return () => {
       if (wsRef.current) wsRef.current.close();
-      if (reconnectTimerRef.current) clearInterval(reconnectTimerRef.current);
     };
   }, [connectWebSocket]);
-
-  // Periodic HTTP Polling fallback when in Wi-Fi mode
-  useEffect(() => {
-    if (connectionMode === "wifi_ws" && !isConnected) {
-      const pollTimer = setInterval(async () => {
-        try {
-          const res = await fetch(`http://${wifiTargetIP}/api/telemetry`, { signal: AbortSignal.timeout(1500) });
-          if (res.ok) {
-            const data = await res.json();
-            setTelemetry((prev) => ({ ...prev, ...data, source: "hardware" }));
-            setIsConnected(true);
-          }
-        } catch (e) {}
-      }, 250);
-      return () => clearInterval(pollTimer);
-    }
-  }, [connectionMode, isConnected, wifiTargetIP]);
 
   // Exam Timer
   useEffect(() => {

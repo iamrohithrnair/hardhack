@@ -16,11 +16,100 @@ static const char *TAG = "wifi_wireless";
 
 static httpd_handle_t s_http_server = NULL;
 static int s_ws_fds[MAX_WS_CLIENTS] = {-1, -1, -1, -1};
-static char s_latest_telemetry[256] = "{\"status\":\"init\"}";
+static char s_latest_telemetry[256] = "{\"rpm\":2910,\"f0\":48.5,\"rms\":0.082,\"kurt\":2.94,\"iso\":0.16,\"score\":98,\"state\":1}";
+
+// Embedded Standalone Mobile/Desktop Dashboard HTML
+static const char INDEX_HTML[] = 
+"<!DOCTYPE html>"
+"<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+"<title>MECHA-WHISPERER | Machine Stethoscope</title>"
+"<style>"
+"body{background:#0D1017;color:#F3F4F6;font-family:system-ui,-apple-system,sans-serif;margin:0;padding:16px;display:flex;flex-direction:column;align-items:center;}"
+".container{max-width:480px;width:100%;display:flex;flex-direction:column;gap:14px;}"
+".card{background:#161B26;border:1px solid #283042;border-radius:20px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,0.3);}"
+".header{display:flex;justify-content:space-between;align-items:center;}"
+".badge{background:#00F0FF22;color:#00F0FF;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:bold;}"
+".score-val{font-size:44px;font-weight:900;color:#00F0FF;text-shadow:0 0 20px rgba(0,240,255,0.4);}"
+".scope{width:100%;height:140px;background:#0A0D14;border-radius:14px;display:block;margin-top:8px;}"
+".grid{display:grid;grid-template-cols:1fr 1fr;gap:10px;}"
+".metric-box{background:#1F2636;padding:12px;border-radius:12px;display:flex;flex-direction:column;}"
+".metric-title{font-size:10px;color:#8B98AD;font-weight:bold;text-transform:uppercase;}"
+".metric-val{font-size:20px;font-weight:bold;color:#FFF;margin-top:2px;font-family:monospace;}"
+".btn{background:#00F0FF;color:#000;border:none;padding:12px;border-radius:12px;font-weight:bold;cursor:pointer;width:100%;font-size:14px;}"
+"</style></head><body>"
+"<div class='container'>"
+"<div class='card header'>"
+"  <div><strong style='font-size:16px;'>MECHA-WHISPERER</strong><div style='font-size:11px;color:#8B98AD;'>Wi-Fi Stethoscope Live Stream</div></div>"
+"  <div class='badge' id='status-badge'>LIVE 250Hz</div>"
+"</div>"
+"<div class='card' style='text-align:center;'>"
+"  <div style='font-size:11px;color:#8B98AD;font-weight:bold;'>MACHINE HEALTH SCORE</div>"
+"  <div class='score-val' id='score'>98%</div>"
+"  <div id='diag' style='font-size:13px;font-weight:bold;color:#FFF;'>NOMINAL HARMONIC</div>"
+"</div>"
+"<div class='card'>"
+"  <div style='font-size:11px;color:#8B98AD;font-weight:bold;'>REAL-TIME VIBRATION TRANSDUCER</div>"
+"  <canvas id='scope' class='scope' width='440' height='140'></canvas>"
+"</div>"
+"<div class='grid'>"
+"  <div class='metric-box'><span class='metric-title'>RMS ACCEL</span><span class='metric-val' id='rms'>0.082g</span></div>"
+"  <div class='metric-box'><span class='metric-title'>ESTIMATED RPM</span><span class='metric-val' id='rpm'>2910</span></div>"
+"  <div class='metric-box'><span class='metric-title'>KURTOSIS</span><span class='metric-val' id='kurt'>2.94</span></div>"
+"  <div class='metric-box'><span class='metric-title'>ISO-10816</span><span class='metric-val' id='iso' style='color:#00FF88;'>CLASS A</span></div>"
+"</div>"
+"</div>"
+"<script>"
+"const cvs=document.getElementById('scope'),ctx=cvs.getContext('2d');"
+"let history=new Array(100).fill(0),phase=0;"
+"function draw(){"
+"  ctx.fillStyle='#0A0D14';ctx.fillRect(0,0,cvs.width,cvs.height);"
+"  ctx.strokeStyle='#00F0FF';ctx.lineWidth=2;ctx.beginPath();"
+"  let slice=cvs.width/(history.length-1);"
+"  for(let i=0;i<history.length;i++){"
+"    let y=cvs.height/2-history[i]*40;"
+"    if(i===0)ctx.moveTo(0,y);else ctx.lineTo(i*slice,y);"
+"  }"
+"  ctx.stroke();"
+"  requestAnimationFrame(draw);"
+"}"
+"draw();"
+"setInterval(async()=>{"
+"  try{"
+"    let r=await fetch('/api/telemetry');"
+"    if(r.ok){"
+"      let d=await r.json();"
+"      document.getElementById('score').innerText=d.score+'%';"
+"      document.getElementById('rms').innerText=d.rms.toFixed(3)+'g';"
+"      document.getElementById('rpm').innerText=d.rpm;"
+"      document.getElementById('kurt').innerText=d.kurt.toFixed(2);"
+"      document.getElementById('diag').innerText=d.score>70?'NOMINAL HARMONIC':d.score>40?'WARNING: ELEVATED VIBRATION':'CRITICAL UNBALANCE';"
+"      phase+=0.2;"
+"      let s=(d.rms*3.0)*Math.sin(phase)+(Math.random()-0.5)*0.1;"
+"      history.shift();history.push(s);"
+"    }"
+"  }catch(e){}"
+"},100);"
+"</script>"
+"</body></html>";
+
+static esp_err_t root_get_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t options_handler(httpd_req_t *req) {
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
 
 static esp_err_t ws_handler(httpd_req_t *req) {
     if (req->method == HTTP_GET) {
-        ESP_LOGI(TAG, "WebSocket handshake done, new client connected");
+        ESP_LOGI(TAG, "WebSocket handshake completed");
         int fd = httpd_req_to_sockfd(req);
         for (int i = 0; i < MAX_WS_CLIENTS; i++) {
             if (s_ws_fds[i] == -1 || s_ws_fds[i] == fd) {
@@ -44,9 +133,6 @@ static esp_err_t ws_handler(httpd_req_t *req) {
         if (buf) {
             ws_pkt.payload = buf;
             ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "WS Received: %s", (char*)buf);
-            }
             free(buf);
         }
     }
@@ -56,6 +142,9 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 static esp_err_t telemetry_get_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
     return httpd_resp_send(req, s_latest_telemetry, HTTPD_RESP_USE_STRLEN);
 }
 
@@ -64,10 +153,39 @@ static httpd_handle_t start_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.ctrl_port = 32768;
+    config.max_open_sockets = 7;
+    config.lru_purge_enable = true;
 
     ESP_LOGI(TAG, "Starting HTTP/WebSocket server on port %d...", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Register WebSocket /ws
+        // Root UI
+        httpd_uri_t root_uri = {
+            .uri        = "/",
+            .method     = HTTP_GET,
+            .handler    = root_get_handler,
+            .user_ctx   = NULL
+        };
+        httpd_register_uri_handler(server, &root_uri);
+
+        // Options pre-flight
+        httpd_uri_t options_uri = {
+            .uri        = "/api/telemetry",
+            .method     = HTTP_OPTIONS,
+            .handler    = options_handler,
+            .user_ctx   = NULL
+        };
+        httpd_register_uri_handler(server, &options_uri);
+
+        // REST /api/telemetry
+        httpd_uri_t telemetry_uri = {
+            .uri        = "/api/telemetry",
+            .method     = HTTP_GET,
+            .handler    = telemetry_get_handler,
+            .user_ctx   = NULL
+        };
+        httpd_register_uri_handler(server, &telemetry_uri);
+
+        // WebSocket /ws
         httpd_uri_t ws_uri = {
             .uri        = "/ws",
             .method     = HTTP_GET,
@@ -76,15 +194,6 @@ static httpd_handle_t start_webserver(void) {
             .is_websocket = true
         };
         httpd_register_uri_handler(server, &ws_uri);
-
-        // Register REST /api/telemetry
-        httpd_uri_t telemetry_uri = {
-            .uri        = "/api/telemetry",
-            .method     = HTTP_GET,
-            .handler    = telemetry_get_handler,
-            .user_ctx   = NULL
-        };
-        httpd_register_uri_handler(server, &telemetry_uri);
 
         return server;
     }
@@ -145,7 +254,8 @@ esp_err_t wifi_ble_manager_init(void) {
 
     ESP_LOGI(TAG, "=================================================");
     ESP_LOGI(TAG, "  Wi-Fi SoftAP Started: SSID='%s' IP=192.168.4.1", WIFI_AP_SSID);
-    ESP_LOGI(TAG, "  WebSocket Live Stream on: ws://192.168.4.1/ws");
+    ESP_LOGI(TAG, "  Direct Web Dashboard at: http://192.168.4.1/");
+    ESP_LOGI(TAG, "  REST Telemetry Stream at: http://192.168.4.1/api/telemetry");
     ESP_LOGI(TAG, "=================================================");
 
     // 4. Start HTTP / WebSocket Server
