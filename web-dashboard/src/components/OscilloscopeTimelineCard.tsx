@@ -12,8 +12,8 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveHistoryRef = useRef<number[]>(new Array(200).fill(0));
-  const fftHistoryRef = useRef<number[]>(new Array(24).fill(0.05));
-  const fftPeaksRef = useRef<number[]>(new Array(24).fill(0.05));
+  const fftHistoryRef = useRef<number[]>(new Array(28).fill(0.05));
+  const fftPeaksRef = useRef<number[]>(new Array(28).fill(0.05));
   const phaseRef = useRef<number>(0);
 
   const isFault = telemetry.score < 50;
@@ -43,52 +43,56 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       ctx.lineTo(w, midY);
       ctx.stroke();
 
-      // Generate physics wave sample based on live telemetry state
-      phaseRef.current += 0.14;
-      const noise = (Math.random() - 0.5) * 0.04;
-      let sample = 0;
+      // Dynamic angular frequency and amplitude directly driven by hardware telemetry
+      const freqMultiplier = Math.max(0.05, (telemetry.f0 || 48.5) / 320.0);
+      phaseRef.current += freqMultiplier;
 
+      // Scale amplitude dynamically with RMS
+      const rmsAmp = Math.max(0.12, Math.min(1.2, telemetry.rms * 6.0));
+      const noise = (Math.random() - 0.5) * (0.04 + telemetry.kurt * 0.01);
+      
+      let sample = 0;
       if (telemetry.state === 1) {
-        sample = 0.28 * Math.sin(phaseRef.current) + noise;
+        sample = rmsAmp * Math.sin(phaseRef.current) + noise;
+      } else if (telemetry.state === 3) {
+        // Rotor unbalance (heavy 1X dominant component + wobble)
+        const mod = 1.0 + 0.35 * Math.sin(phaseRef.current * 0.25);
+        sample = rmsAmp * 1.5 * Math.sin(phaseRef.current) * mod + 0.4 * Math.sin(phaseRef.current * 2) + noise * 2;
       } else {
-        const mod = 1.0 + 0.3 * Math.sin(phaseRef.current * 0.2);
-        sample = 0.85 * Math.sin(phaseRef.current) * mod + 0.3 * Math.sin(phaseRef.current * 2) + noise * 4;
+        // Bearing damage (high kurtosis impulse spikes)
+        const spike = Math.random() < 0.1 ? (Math.random() - 0.5) * 2.5 : 0;
+        sample = rmsAmp * Math.sin(phaseRef.current) + spike + noise * 3;
       }
 
       waveHistoryRef.current.shift();
       waveHistoryRef.current.push(sample);
 
-      // 24-Band FFT Bars in Background
-      const BARS = 24;
-      const barWidth = (w - (BARS - 1) * 6) / BARS;
+      // 28-Band Dynamic Spectral Bars in Background
+      const BARS = 28;
+      const barWidth = (w - (BARS - 1) * 5) / BARS;
 
       for (let i = 0; i < BARS; i++) {
-        let target = 0.04;
-        if (telemetry.state === 1) {
-          if (i === 4) target = 0.75;
-          if (i === 8) target = 0.15;
-        } else {
-          if (i === 4) target = 0.95;
-          if (i === 8) target = 0.65;
-          if (i === 12) target = 0.45;
-        }
+        let target = 0.03 + (telemetry.rms * 0.4);
+        if (i === 5) target = Math.min(0.95, 0.4 + telemetry.rms * 2.5); // 1X fundamental
+        if (i === 10 && telemetry.state !== 1) target = Math.min(0.85, 0.25 + telemetry.rms * 2.0); // 2X harmonic
+        if (i === 15 && telemetry.state === 4) target = Math.min(0.75, 0.3 + telemetry.kurt * 0.08); // Bearing resonance
 
-        fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.8 + target * 0.2;
+        fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.85 + target * 0.15;
         if (fftHistoryRef.current[i] > fftPeaksRef.current[i]) {
           fftPeaksRef.current[i] = fftHistoryRef.current[i];
         } else {
-          fftPeaksRef.current[i] = Math.max(0, fftPeaksRef.current[i] - 0.012);
+          fftPeaksRef.current[i] = Math.max(0, fftPeaksRef.current[i] - 0.015);
         }
 
-        const bx = i * (barWidth + 6);
-        const bh = fftHistoryRef.current[i] * (h * 0.7);
+        const bx = i * (barWidth + 5);
+        const bh = fftHistoryRef.current[i] * (h * 0.75);
         const by = h - bh;
 
-        ctx.fillStyle = isFault ? "rgba(244, 63, 94, 0.22)" : "rgba(245, 197, 68, 0.18)";
+        ctx.fillStyle = isFault ? "rgba(244, 63, 94, 0.25)" : "rgba(245, 197, 68, 0.20)";
         ctx.fillRect(bx, by, barWidth, bh);
 
         // Peak line
-        const py = h - fftPeaksRef.current[i] * (h * 0.7);
+        const py = h - fftPeaksRef.current[i] * (h * 0.75);
         ctx.fillStyle = isFault ? "#F43F5E" : "#F5C544";
         ctx.fillRect(bx, py, barWidth, 2);
       }
@@ -98,89 +102,86 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       ctx.strokeStyle = traceColor;
       ctx.lineWidth = 2.5;
       ctx.shadowColor = traceColor;
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = 10;
       ctx.beginPath();
 
-      const points = waveHistoryRef.current;
-      for (let i = 0; i < points.length; i++) {
-        const x = (i / points.length) * w;
-        const y = midY - points[i] * (h * 0.4);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+      const sliceWidth = w / (waveHistoryRef.current.length - 1);
+      for (let i = 0; i < waveHistoryRef.current.length; i++) {
+        const val = waveHistoryRef.current[i];
+        const y = midY - val * (h * 0.38);
+        const x = i * sliceWidth;
+
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
       }
       ctx.stroke();
-      ctx.shadowBlur = 0;
+      ctx.shadowBlur = 0; // Reset shadow
 
       animationFrameId = requestAnimationFrame(render);
     };
 
     render();
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [telemetry.state, isFault]);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [isFault, telemetry.f0, telemetry.kurt, telemetry.rms, telemetry.state]);
 
   return (
-    <section className="bg-white rounded-[28px] p-6 border border-black/5 shadow-[0_12px_32px_rgba(0,0,0,0.03)] flex flex-col gap-4">
-      {/* Header with Month Navigation & Legend */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div className="flex items-center gap-3.5">
-          <span className="text-xs text-[#9CA3AF] font-semibold hover:text-[#12141A] cursor-pointer">
-            August
-          </span>
-          <span className="text-sm font-bold text-[#12141A]">September 2026</span>
-          <span className="text-xs text-[#9CA3AF] font-semibold hover:text-[#12141A] cursor-pointer">
-            October
+    <div className="bg-[#12141A] rounded-[32px] p-6 lg:p-7 border border-white/10 shadow-2xl flex flex-col gap-5 relative overflow-hidden">
+      {/* Top Header Row */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-3 h-3 rounded-full bg-[#0EA5E9] shadow-[0_0_10px_rgba(14,165,233,0.8)] animate-pulse" />
+          <h3 className="text-base font-bold text-white tracking-tight">
+            Live Micro-Vibration Oscilloscope & FFT Transducer
+          </h3>
+          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-white/10 text-sky-400 font-bold">
+            250 Hz Continuous
           </span>
         </div>
 
-        <div className="flex items-center gap-4 text-[11px] font-semibold text-[#6B7280]">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-sky-500" />
-            <span>Micro-Vibration Trace</span>
+        {/* Live Metrics Badges */}
+        <div className="flex items-center gap-2">
+          <div className="px-3 py-1 rounded-xl bg-white/5 border border-white/10 text-xs font-mono text-neutral-300">
+            F0: <strong className="text-white">{(telemetry.f0 || 48.5).toFixed(1)} Hz</strong>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#F5C544]" />
-            <span>24-Band FFT Spectrum</span>
+          <div className="px-3 py-1 rounded-xl bg-white/5 border border-white/10 text-xs font-mono text-neutral-300">
+            RPM: <strong className="text-[#F5C544]">{telemetry.rpm}</strong>
           </div>
-          {isFault && (
-            <div className="flex items-center gap-1.5 text-rose-600">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-              <span>Critical Anomaly</span>
-            </div>
-          )}
+          <div className="px-3 py-1 rounded-xl bg-white/5 border border-white/10 text-xs font-mono text-neutral-300">
+            Kurtosis: <strong className={telemetry.kurt > 4 ? "text-rose-400" : "text-emerald-400"}>{telemetry.kurt.toFixed(2)}</strong>
+          </div>
         </div>
       </div>
 
-      {/* Canvas Viewport with Floating Event Pills */}
-      <div className="w-full h-36 bg-[#0D1017] rounded-2xl overflow-hidden relative shadow-inner">
+      {/* Canvas Scope */}
+      <div className="relative w-full h-48 sm:h-56 rounded-2xl overflow-hidden border border-white/5 bg-[#0D1017]">
         <canvas
           ref={canvasRef}
-          width={1200}
-          height={144}
-          className="w-full h-full block"
+          width={1000}
+          height={260}
+          className="w-full h-full object-cover"
         />
 
-        {/* Floating Timeline Event Pills */}
-        <div className="absolute top-3 left-[18%] bg-[#1C1F26]/90 border border-white/15 border-l-4 border-l-sky-400 backdrop-blur-md px-3.5 py-1.5 rounded-full text-white shadow-md pointer-events-none flex flex-col">
-          <span className="text-[11px] font-bold">Baseline Lock</span>
-          <span className="text-[9px] text-[#9CA3AF]">F0: 48.5 Hz · Smooth Sine Wave</span>
+        {/* Bottom Left Status Overlay */}
+        <div className="absolute bottom-3 left-4 flex items-center gap-2 pointer-events-none">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+          <span className="text-[11px] font-mono font-bold text-neutral-400 uppercase tracking-wider">
+            {telemetry.source === "hardware" ? "HARDWARE TELEMETRY LIVE" : "SIMULATION ENGINE LIVE"}
+          </span>
         </div>
 
-        {isFault && (
-          <div className="absolute top-3 left-[62%] bg-rose-950/90 border border-rose-500/30 border-l-4 border-l-rose-500 backdrop-blur-md px-3.5 py-1.5 rounded-full text-white shadow-lg pointer-events-none flex flex-col animate-bounce">
-            <span className="text-[11px] font-bold text-rose-300">Rotor Imbalance Spike</span>
-            <span className="text-[9px] text-rose-200">+18 dB 1X Harmonics · Health 18%</span>
-          </div>
-        )}
+        {/* Bottom Right Scale Overlay */}
+        <div className="absolute bottom-3 right-4 flex items-center gap-3 text-[10px] font-mono text-neutral-500 pointer-events-none">
+          <span>RMS: {telemetry.rms.toFixed(3)}g</span>
+          <span>ISO: {telemetry.iso.toFixed(2)} mm/s</span>
+          <span>GAIN: 8X</span>
+        </div>
       </div>
-
-      {/* Timeline Axis Labels */}
-      <div className="flex justify-between text-[11px] text-[#9CA3AF] font-semibold px-2">
-        <span>00:00s</span>
-        <span>00:15s (Exam Start)</span>
-        <span>00:30s (Nominal Lock)</span>
-        <span>00:45s (Fault Induced)</span>
-        <span>01:00s (Diagnosis Complete)</span>
-      </div>
-    </section>
+    </div>
   );
 };
