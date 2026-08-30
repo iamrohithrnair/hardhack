@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "bsp/esp-bsp.h"
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -20,6 +21,7 @@
 
 static const char *TAG = "mecha_whisperer";
 
+#define BOOT_BUTTON_GPIO     GPIO_NUM_0
 #define IMU_SAMPLE_PERIOD_MS 4     // 250 Hz sampling rate
 #define DSP_PERIOD_MS        20    // 50 Hz DSP & UI refresh rate
 #define BUFFER_SIZE          FFT_SIZE
@@ -58,70 +60,69 @@ static esp_err_t imu_init_board(void) {
     if (ret != ESP_OK) return ret;
 
     // Reset & Configure
-    qmi8658_write_register(&s_imu, 0x60, 0xB0);
-    vTaskDelay(pdMS_TO_TICKS(20));
-    qmi8658_write_register(&s_imu, QMI8658_CTRL1, 0x60);
-
-    qmi8658_set_accel_range(&s_imu, QMI8658_ACCEL_RANGE_4G);
+    qmi8658_reset(&s_imu);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    qmi8658_set_accel_range(&s_imu, QMI8658_ACCEL_RANGE_8G);
     qmi8658_set_accel_odr(&s_imu, QMI8658_ACCEL_ODR_250HZ);
-    qmi8658_set_gyro_range(&s_imu, QMI8658_GYRO_RANGE_256DPS);
+    qmi8658_set_gyro_range(&s_imu, QMI8658_GYRO_RANGE_512DPS);
     qmi8658_set_gyro_odr(&s_imu, QMI8658_GYRO_ODR_250HZ);
-    qmi8658_set_accel_unit_mps2(&s_imu, true); // in m/s^2
-    qmi8658_set_gyro_unit_dps(&s_imu, true);
     qmi8658_enable_sensors(&s_imu, QMI8658_ENABLE_ACCEL | QMI8658_ENABLE_GYRO);
 
     s_imu_ready = true;
+    ESP_LOGI(TAG, "QMI8658 IMU configured at 250 Hz, ±8g");
     return ESP_OK;
 }
 
-static void imu_sampler_task(void *arg) {
-    TickType_t last_wake = xTaskGetTickCount();
-    const TickType_t period = pdMS_TO_TICKS(IMU_SAMPLE_PERIOD_MS);
-    static float dc_x = 0.0f, dc_y = 0.0f, dc_z = 0.0f;
+static void imu_sampler_task(void *pvParameters) {
+    (void)pvParameters;
+    qmi8658_data_t imu_data;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    
+    float s_dc_ax = 0.0f, s_dc_ay = 0.0f, s_dc_az = 0.0f;
 
     while (true) {
-        float sample = 0.0f;
-        if (s_imu_ready) {
-            qmi8658_data_t data = {0};
-            if (qmi8658_read_sensor_data(&s_imu, &data) == ESP_OK) {
-                // Acceleration in m/s^2 converted to g (1g = 9.80665 m/s^2)
-                float gx = data.accelX / 9.80665f;
-                float gy = data.accelY / 9.80665f;
-                float gz = data.accelZ / 9.80665f;
+        if (qmi8658_read_sensor_data(&s_imu, &imu_data) == ESP_OK) {
+            s_imu_ready = true;
+            // Exponential moving average for gravity cancellation (AC high-pass filter)
+            s_dc_ax = s_dc_ax * 0.98f + imu_data.accelX * 0.02f;
+            s_dc_ay = s_dc_ay * 0.98f + imu_data.accelY * 0.02f;
+            s_dc_az = s_dc_az * 0.98f + imu_data.accelZ * 0.02f;
 
-                // High-pass filter to extract pure AC micro-vibrations
-                dc_x = 0.98f * dc_x + 0.02f * gx;
-                dc_y = 0.98f * dc_y + 0.02f * gy;
-                dc_z = 0.98f * dc_z + 0.02f * gz;
+            float ac_x = imu_data.accelX - s_dc_ax;
+            float ac_y = imu_data.accelY - s_dc_ay;
+            float ac_z = imu_data.accelZ - s_dc_az;
 
-                float ac_x = gx - dc_x;
-                float ac_y = gy - dc_y;
-                float ac_z = gz - dc_z;
+            // Compute dynamic AC vibration magnitude in Gs
+            float dynamic_vib = sqrtf(ac_x*ac_x + ac_y*ac_y + ac_z*ac_z) / 1000.0f;
 
-                // Total dynamic vibration AC magnitude
-                float dyn = sqrtf(ac_x * ac_x + ac_y * ac_y + ac_z * ac_z);
-                sample = (ac_z >= 0.0f) ? dyn : -dyn;
+            if (xSemaphoreTake(s_data_mutex, 0) == pdTRUE) {
+                s_vibration_ring[s_ring_idx] = dynamic_vib;
+                s_ring_idx = (s_ring_idx + 1) % BUFFER_SIZE;
+                xSemaphoreGive(s_data_mutex);
             }
         }
-
-        if (xSemaphoreTake(s_data_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
-            s_vibration_ring[s_ring_idx] = sample;
-            s_ring_idx = (s_ring_idx + 1) % BUFFER_SIZE;
-            xSemaphoreGive(s_data_mutex);
-        }
-
-        vTaskDelayUntil(&last_wake, period);
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(IMU_SAMPLE_PERIOD_MS));
     }
 }
 
 void app_main(void) {
     ESP_LOGI(TAG, "=============================================");
-    ESP_LOGI(TAG, "  MECHA-WHISPERER: The Stethoscope for Machines");
+    ESP_LOGI(TAG, "  MECHA-WHISPERER: Edge Acoustic Stethoscope ");
     ESP_LOGI(TAG, "  Target: Waveshare ESP32-S3-Touch-AMOLED-1.8");
     ESP_LOGI(TAG, "=============================================");
 
     s_data_mutex = xSemaphoreCreateMutex();
     dsp_engine_init();
+
+    // 0. Initialize BOOT Button (GPIO 0)
+    gpio_config_t btn_cfg = {
+        .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&btn_cfg);
 
     // 1. Initialize Display and LVGL
     lv_display_t *display = bsp_display_start();
@@ -129,7 +130,7 @@ void app_main(void) {
         ESP_LOGE(TAG, "Display initialization failed");
         return;
     }
-    bsp_display_brightness_set(90);
+    bsp_display_brightness_set(100);
 
     // 2. Initialize Wireless Wi-Fi SoftAP & WebSocket Server
     wifi_ble_manager_init();
@@ -152,7 +153,20 @@ void app_main(void) {
     xTaskCreatePinnedToCore(imu_sampler_task, "imu_task", 4096, NULL, 5, NULL, 0);
 
     // 6. Main UI & DSP Loop
+    static bool s_btn_last_state = true;
+
     while (true) {
+        // Handle BOOT Switch press to cycle views
+        bool btn_state = gpio_get_level(BOOT_BUTTON_GPIO);
+        if (!btn_state && s_btn_last_state) {
+            ESP_LOGI(TAG, "BOOT switch clicked! Switching graph view...");
+            if (bsp_display_lock(50)) {
+                ui_engine_next_view();
+                bsp_display_unlock();
+            }
+        }
+        s_btn_last_state = btn_state;
+
         // Prepare linear sample buffer
         if (dsp_engine_is_demo_mode() || !s_imu_ready) {
             dsp_engine_generate_demo_samples(s_vibration_snapshot, BUFFER_SIZE, 250.0f);
@@ -183,14 +197,15 @@ void app_main(void) {
             last_log = now;
             char json_buf[192];
             snprintf(json_buf, sizeof(json_buf),
-                   "{\"rpm\":%lu,\"f0\":%.1f,\"rms\":%.3f,\"kurt\":%.2f,\"iso\":%.2f,\"score\":%d,\"state\":%d}\n",
+                   "{\"rpm\":%lu,\"f0\":%.1f,\"rms\":%.3f,\"kurt\":%.2f,\"iso\":%.2f,\"score\":%d,\"state\":%d,\"view\":%d}\n",
                    (unsigned long)metrics->estimated_rpm,
                    metrics->peak_freq_hz,
                    metrics->rms_acceleration_g,
                    metrics->kurtosis,
                    metrics->iso_vibration_vel,
                    metrics->health_score,
-                   (int)metrics->state);
+                   (int)metrics->state,
+                   (int)ui_engine_get_view());
             printf("%s", json_buf);
             wifi_ble_broadcast_telemetry(json_buf);
         }

@@ -6,6 +6,10 @@
 #include "nvs_flash.h"
 #include "esp_netif.h"
 #include "esp_http_server.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
+#include "ble_manager.h"
 
 static const char *TAG = "wifi_wireless";
 
@@ -16,7 +20,10 @@ static const char *TAG = "wifi_wireless";
 
 static httpd_handle_t s_http_server = NULL;
 static int s_ws_fds[MAX_WS_CLIENTS] = {-1, -1, -1, -1};
-static char s_latest_telemetry[256] = "{\"rpm\":2910,\"f0\":48.5,\"rms\":0.082,\"kurt\":2.94,\"iso\":0.16,\"score\":98,\"state\":1}";
+static SemaphoreHandle_t s_ws_mutex = NULL;
+static SemaphoreHandle_t s_telemetry_mutex = NULL;
+static wifi_command_cb_t s_command_cb = NULL;
+static char s_latest_telemetry[224] = "{\"rpm\":2910,\"f0\":48.5,\"rms\":0.082,\"kurt\":2.94,\"iso\":0.16,\"score\":98,\"state\":1}";
 
 // Embedded Standalone Mobile/Desktop Dashboard HTML
 static const char INDEX_HTML[] = 
@@ -31,7 +38,7 @@ static const char INDEX_HTML[] =
 ".badge{background:#00F0FF22;color:#00F0FF;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:bold;}"
 ".score-val{font-size:44px;font-weight:900;color:#00F0FF;text-shadow:0 0 20px rgba(0,240,255,0.4);}"
 ".scope{width:100%;height:140px;background:#0A0D14;border-radius:14px;display:block;margin-top:8px;}"
-".grid{display:grid;grid-template-cols:1fr 1fr;gap:10px;}"
+".grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}"
 ".metric-box{background:#1F2636;padding:12px;border-radius:12px;display:flex;flex-direction:column;}"
 ".metric-title{font-size:10px;color:#8B98AD;font-weight:bold;text-transform:uppercase;}"
 ".metric-val{font-size:20px;font-weight:bold;color:#FFF;margin-top:2px;font-family:monospace;}"
@@ -92,6 +99,43 @@ static const char INDEX_HTML[] =
 "</script>"
 "</body></html>";
 
+static void ws_client_register(int fd) {
+    xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    int free_slot = -1;
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (s_ws_fds[i] == fd) {
+            xSemaphoreGive(s_ws_mutex);
+            return;
+        }
+        if (s_ws_fds[i] == -1 && free_slot == -1) free_slot = i;
+    }
+    if (free_slot != -1) {
+        s_ws_fds[free_slot] = fd;
+        ESP_LOGI(TAG, "WebSocket client registered (fd=%d)", fd);
+    } else {
+        ESP_LOGW(TAG, "WebSocket client limit reached, rejecting fd=%d", fd);
+    }
+    xSemaphoreGive(s_ws_mutex);
+}
+
+static void ws_client_unregister(int fd) {
+    xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (s_ws_fds[i] == fd) {
+            s_ws_fds[i] = -1;
+            ESP_LOGI(TAG, "WebSocket client removed (fd=%d)", fd);
+        }
+    }
+    xSemaphoreGive(s_ws_mutex);
+}
+
+// Called by esp_http_server whenever any socket is torn down, so a recycled fd
+// is never mistaken for a still-open WebSocket.
+static void http_close_fn(httpd_handle_t hd, int sockfd) {
+    ws_client_unregister(sockfd);
+    close(sockfd);
+}
+
 static esp_err_t root_get_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -103,36 +147,52 @@ static esp_err_t options_handler(httpd_req_t *req) {
     httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "*");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
+    httpd_resp_set_hdr(req, "Access-Control-Max-Age", "600");
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
 
 static esp_err_t ws_handler(httpd_req_t *req) {
     if (req->method == HTTP_GET) {
-        ESP_LOGI(TAG, "WebSocket handshake completed");
         int fd = httpd_req_to_sockfd(req);
-        for (int i = 0; i < MAX_WS_CLIENTS; i++) {
-            if (s_ws_fds[i] == -1 || s_ws_fds[i] == fd) {
-                s_ws_fds[i] = fd;
-                break;
-            }
-        }
+        ESP_LOGI(TAG, "WebSocket handshake completed (fd=%d)", fd);
+        ws_client_register(fd);
+
+        // Prime the client with the most recent frame so the UI has data instantly.
+        char snapshot[sizeof(s_latest_telemetry)];
+        xSemaphoreTake(s_telemetry_mutex, portMAX_DELAY);
+        strlcpy(snapshot, s_latest_telemetry, sizeof(snapshot));
+        xSemaphoreGive(s_telemetry_mutex);
+
+        httpd_ws_frame_t ws_pkt = {
+            .type = HTTPD_WS_TYPE_TEXT,
+            .payload = (uint8_t *)snapshot,
+            .len = strlen(snapshot),
+        };
+        httpd_ws_send_frame(req, &ws_pkt);
         return ESP_OK;
     }
 
     httpd_ws_frame_t ws_pkt;
-    uint8_t *buf = NULL;
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
 
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
     if (ret != ESP_OK) return ret;
 
-    if (ws_pkt.len) {
-        buf = calloc(1, ws_pkt.len + 1);
+    if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE) {
+        ws_client_unregister(httpd_req_to_sockfd(req));
+        return ESP_OK;
+    }
+
+    if (ws_pkt.len > 0 && ws_pkt.len < 128) {
+        uint8_t *buf = calloc(1, ws_pkt.len + 1);
         if (buf) {
             ws_pkt.payload = buf;
             ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
+            if (ret == ESP_OK && ws_pkt.type == HTTPD_WS_TYPE_TEXT && s_command_cb) {
+                s_command_cb((const char *)buf);
+            }
             free(buf);
         }
     }
@@ -140,12 +200,45 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 }
 
 static esp_err_t telemetry_get_handler(httpd_req_t *req) {
+    char snapshot[sizeof(s_latest_telemetry)];
+    xSemaphoreTake(s_telemetry_mutex, portMAX_DELAY);
+    strlcpy(snapshot, s_latest_telemetry, sizeof(snapshot));
+    xSemaphoreGive(s_telemetry_mutex);
+
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "*");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
-    return httpd_resp_send(req, s_latest_telemetry, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, snapshot, HTTPD_RESP_USE_STRLEN);
+}
+
+// POST /api/control  body: {"command":"CALIBRATE"} or {"command":"SET_FAULT","param":"bearing"}
+static esp_err_t control_post_handler(httpd_req_t *req) {
+    char body[128] = {0};
+    int received = 0;
+    int remaining = req->content_len;
+    if (remaining >= (int)sizeof(body)) remaining = sizeof(body) - 1;
+
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, body + received, remaining - received);
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    if (s_command_cb) {
+        s_command_cb(body);
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
+    return httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
 }
 
 static httpd_handle_t start_webserver(void) {

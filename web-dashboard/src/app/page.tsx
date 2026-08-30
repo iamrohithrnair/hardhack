@@ -10,6 +10,7 @@ import { VibrationSeverityCard } from "../components/VibrationSeverityCard";
 import { RadialExamCard } from "../components/RadialExamCard";
 import { DemoChecklistCard } from "../components/DemoChecklistCard";
 import { OscilloscopeTimelineCard } from "../components/OscilloscopeTimelineCard";
+import { GraphGalleryStudio } from "../components/GraphGalleryStudio";
 import { AIDiagnosticModal } from "../components/AIDiagnosticModal";
 import { DeviceCustomizerModal } from "../components/DeviceCustomizerModal";
 import { ConnectionModal } from "../components/ConnectionModal";
@@ -103,29 +104,23 @@ export default function DashboardPage() {
                 onOpenCustomizer={() => setIsDeviceModalOpen(true)}
               />
 
-              {/* Card 2: Vibration Severity & Session Bars */}
+              {/* Card 2: Micro-Vibration Severity RMS */}
               <VibrationSeverityCard
                 telemetry={telemetry}
-                onOpenReport={() => setIsAIModalOpen(true)}
+                onOpenReport={() => setActiveTab("vibration")}
               />
 
-              {/* Card 3: Radial Exam Gauge & Stopwatch */}
+              {/* Card 3: Radial Diagnostic Health Score */}
               <RadialExamCard
                 telemetry={telemetry}
-                examSeconds={examSeconds}
                 isExamRunning={isExamRunning}
+                examSeconds={examSeconds}
                 onTogglePlay={() => setIsExamRunning(!isExamRunning)}
                 onCalibrate={calibrate}
-                onToggleDemo={() => {
-                  if (telemetry.state === 1) {
-                    setFaultMode("unbalance");
-                  } else {
-                    setFaultMode("healthy");
-                  }
-                }}
+                onToggleDemo={() => setFaultMode(telemetry.state === 1 ? "unbalance" : "healthy")}
               />
 
-              {/* Card 4: 1-Min Pitch Exam Checklist */}
+              {/* Card 4: Interactive Demo & Machine Fault Simulator */}
               <DemoChecklistCard
                 telemetry={telemetry}
                 onSelectMode={(mode) => setFaultMode(mode)}
@@ -134,6 +129,9 @@ export default function DashboardPage() {
 
             {/* Bottom Timeline & Real-Time Oscilloscope Card */}
             <OscilloscopeTimelineCard telemetry={telemetry} />
+
+            {/* Sensor Chart Studio (10 Real-Time Graph Styles) */}
+            <GraphGalleryStudio telemetry={telemetry} />
           </div>
         )}
 
@@ -181,11 +179,11 @@ export default function DashboardPage() {
         <ConnectionModal
           isOpen={isConnectionModalOpen}
           onClose={() => setIsConnectionModalOpen(false)}
-          isConnected={isConnected}
           connectionMode={connectionMode}
+          isConnected={isConnected}
           onConnectWebSerial={connectWebSerial}
           onConnectBluetooth={connectBluetooth}
-          onConnectWiFi={connectWiFi}
+          onConnectWiFi={(ip) => connectWiFi(ip)}
           onConnectSimulator={connectSimulator}
           onDisconnect={disconnect}
         />
