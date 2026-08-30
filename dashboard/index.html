@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mecha-Whisperer | Machine Health Stethoscope Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Main Container -->
+    <div class="dashboard-wrapper">
+
+        <!-- Top Navigation Bar -->
+        <header class="top-nav">
+            <div class="brand-pill">
+                <div class="brand-dot"></div>
+                <span>MechaWhisperer</span>
+            </div>
+
+            <nav class="nav-links">
+                <button class="nav-item active" data-tab="dashboard">Dashboard</button>
+                <button class="nav-item" data-tab="vibration">Vibration FFT</button>
+                <button class="nav-item" data-tab="stethoscope">Stethoscope</button>
+                <button class="nav-item" data-tab="iso">ISO 10816</button>
+                <button class="nav-item" data-tab="records">History</button>
+            </nav>
+
+            <div class="nav-actions">
+                <button class="action-icon-btn" id="sound-toggle-btn" title="Toggle Mechanical Audio">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                </button>
+                <button class="connect-btn" id="connect-serial-btn">
+                    <span class="status-indicator-dot" id="conn-dot"></span>
+                    <span id="conn-label">Pair ESP32-S3</span>
+                </button>
+                <div class="user-avatar" title="Inspector Profile">
+                    <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80" alt="Inspector">
+                </div>
+            </div>
+        </header>
+
+        <!-- Greeting & Hero Summary -->
+        <section class="hero-section">
+            <div class="hero-left">
+                <h1 class="hero-title">Diagnostic Center, <span class="machine-name" id="hero-machine-name">Desk Fan 01</span></h1>
+                <div class="hero-progress-bar">
+                    <div class="progress-segment seg-health" style="width: 32%;">
+                        <span class="seg-label">Health</span>
+                        <span class="seg-val" id="top-health-val">98%</span>
+                    </div>
+                    <div class="progress-segment seg-balance" style="width: 28%;">
+                        <span class="seg-label">Balance</span>
+                        <span class="seg-val" id="top-balance-val">96%</span>
+                    </div>
+                    <div class="progress-segment seg-iso" style="width: 25%;">
+                        <span class="seg-label">ISO 10816</span>
+                        <span class="seg-val" id="top-iso-val">Class A</span>
+                    </div>
+                    <div class="progress-segment seg-kurt" style="width: 15%;">
+                        <span class="seg-label">Kurtosis</span>
+                        <span class="seg-val" id="top-kurt-val">2.9</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hero-right-metrics">
+                <div class="stat-group">
+                    <div class="stat-icon-wrapper">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>
+                    </div>
+                    <div class="stat-number-box">
+                        <span class="stat-number" id="stat-rpm">2,910</span>
+                        <span class="stat-label">Rotor RPM</span>
+                    </div>
+                </div>
+                <div class="stat-group">
+                    <div class="stat-icon-wrapper">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                    </div>
+                    <div class="stat-number-box">
+                        <span class="stat-number" id="stat-freq">48.5</span>
+                        <span class="stat-label">Freq (Hz)</span>
+                    </div>
+                </div>
+                <div class="stat-group">
+                    <div class="stat-icon-wrapper">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                    </div>
+                    <div class="stat-number-box">
+                        <span class="stat-number" id="stat-rms-val">0.082</span>
+                        <span class="stat-label">RMS (g)</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Dashboard 4-Column Grid -->
+        <main class="dashboard-grid">
+
+            <!-- Card 1: Equipment Profile & Sensor Specs -->
+            <div class="card card-profile">
+                <div class="profile-image-container">
+                    <img src="https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=500&auto=format&fit=crop&q=80" alt="Machine Profile" class="machine-photo">
+                    <div class="profile-floating-badge" id="profile-badge">
+                        <span class="badge-dot"></span>
+                        <span id="profile-status-text">Healthy Operation</span>
+                    </div>
+                    <div class="profile-cost-tag" id="sensor-odr-tag">1000 Hz IMU</div>
+                </div>
+                <div class="profile-details">
+                    <h3 class="profile-name">Industrial Desk Fan</h3>
+                    <p class="profile-role">4-Pole AC Induction Rotor</p>
+                </div>
+
+                <div class="accordion-list">
+                    <div class="accordion-item">
+                        <div class="accordion-header">
+                            <span>Vibration Severity</span>
+                            <span class="acc-val" id="acc-severity">0.16 mm/s</span>
+                        </div>
+                    </div>
+                    <div class="accordion-item active">
+                        <div class="accordion-header">
+                            <span>Paired Hardware</span>
+                            <span class="acc-badge">AMOLED 1.8"</span>
+                        </div>
+                        <div class="accordion-body">
+                            <div class="hardware-spec-row">
+                                <div class="device-thumb">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                                </div>
+                                <div class="device-info">
+                                    <div class="device-name">Waveshare ESP32-S3</div>
+                                    <div class="device-sub">QMI8658 + ES8311 Codec</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <div class="accordion-header">
+                            <span>Bearing Raceways</span>
+                            <span class="acc-val" id="acc-bearing-text">Smooth (98%)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 2: Micro-Vibration Progress & Amplitude Bar Chart -->
+            <div class="card card-progress">
+                <div class="card-header">
+                    <span class="card-title">Vibration Severity</span>
+                    <button class="arrow-btn" title="View Full Report">↗</button>
+                </div>
+                <div class="big-metric-row">
+                    <span class="big-metric-num" id="big-vibe-num">0.08</span>
+                    <div class="big-metric-sub">
+                        <span>RMS Accel</span>
+                        <span>g-force</span>
+                    </div>
+                </div>
+
+                <!-- Vertical Bar Trend Chart -->
+                <div class="bar-chart-container" id="bar-chart-container">
+                    <div class="bar-col"><div class="bar-fill" style="height: 25%;"></div><span class="bar-day">S</span></div>
+                    <div class="bar-col"><div class="bar-fill" style="height: 60%;"></div><span class="bar-day">M</span></div>
+                    <div class="bar-col"><div class="bar-fill" style="height: 40%;"></div><span class="bar-day">T</span></div>
+                    <div class="bar-col"><div class="bar-fill" style="height: 35%;"></div><span class="bar-day">W</span></div>
+                    <div class="bar-col active-bar"><div class="bar-fill highlight" id="active-live-bar" style="height: 75%;"><span class="bar-tooltip" id="bar-tooltip">0.08g</span></div><span class="bar-day">T</span></div>
+                    <div class="bar-col"><div class="bar-fill" style="height: 30%;"></div><span class="bar-day">F</span></div>
+                    <div class="bar-col"><div class="bar-fill" style="height: 20%;"></div><span class="bar-day">S</span></div>
+                </div>
+            </div>
+
+            <!-- Card 3: Stethoscope Radial Gauge & Inspection Timer -->
+            <div class="card card-radial">
+                <div class="card-header">
+                    <span class="card-title">Stethoscope Exam</span>
+                    <button class="arrow-btn" title="Inspect">↗</button>
+                </div>
+
+                <div class="radial-gauge-container">
+                    <svg class="radial-svg" viewBox="0 0 200 200">
+                        <!-- Ticks -->
+                        <g class="gauge-ticks" id="gauge-ticks"></g>
+                        <!-- Background Circle -->
+                        <circle cx="100" cy="100" r="72" class="gauge-bg-circle"></circle>
+                        <!-- Active Arc -->
+                        <circle cx="100" cy="100" r="72" class="gauge-progress-arc" id="gauge-arc" style="stroke-dashoffset: 90;"></circle>
+                    </svg>
+                    <div class="radial-center-content">
+                        <div class="radial-time" id="exam-timer">00:45</div>
+                        <div class="radial-sub">Exam Time</div>
+                    </div>
+                </div>
+
+                <div class="radial-controls">
+                    <button class="ctrl-btn play-btn" id="play-pause-exam-btn" title="Start/Pause Exam">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    </button>
+                    <button class="ctrl-btn" id="calib-btn" title="Recalibrate Baseline">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                    </button>
+                    <button class="ctrl-btn" id="sim-toggle-btn" title="Toggle Demo Simulator">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Card 4: 1-Minute Live Demo Checklist & Anomaly Health -->
+            <div class="card card-tasks">
+                <div class="card-header">
+                    <span class="card-title">Diagnostic Health</span>
+                    <span class="badge-percent" id="health-percent-badge">98%</span>
+                </div>
+
+                <div class="segment-tabs">
+                    <button class="seg-tab active" id="tab-nominal">Nominal</button>
+                    <button class="seg-tab" id="tab-unbalance">Imbalance</button>
+                    <button class="seg-tab" id="tab-bearing">Bearing</button>
+                </div>
+
+                <!-- Dark Diagnostic Checklist Card -->
+                <div class="dark-task-card">
+                    <div class="dark-card-header">
+                        <span class="dark-title">1-Min Pitch Exam</span>
+                        <span class="dark-counter" id="task-counter">4/5</span>
+                    </div>
+
+                    <div class="task-items-list">
+                        <div class="task-item completed" id="task-1">
+                            <div class="task-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></div>
+                            <div class="task-info">
+                                <div class="task-name">1. Solid-State Contact</div>
+                                <div class="task-sub">IMU pressed firmly to fan base</div>
+                            </div>
+                            <div class="task-check"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+                        </div>
+
+                        <div class="task-item completed" id="task-2">
+                            <div class="task-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg></div>
+                            <div class="task-info">
+                                <div class="task-name">2. 1X RPM Fundamental Lock</div>
+                                <div class="task-sub">F0: 48.5 Hz (2,910 RPM) verified</div>
+                            </div>
+                            <div class="task-check"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+                        </div>
+
+                        <div class="task-item" id="task-3">
+                            <div class="task-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg></div>
+                            <div class="task-info">
+                                <div class="task-name">3. Rotor Imbalance (Blu-Tack)</div>
+                                <div class="task-sub" id="task-3-sub">Attach tape to blade for anomaly</div>
+                            </div>
+                            <div class="task-check circle-pending"></div>
+                        </div>
+
+                        <div class="task-item completed" id="task-4">
+                            <div class="task-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg></div>
+                            <div class="task-info">
+                                <div class="task-name">4. ISO 10816 Classification</div>
+                                <div class="task-sub">Class A (< 1.12 mm/s) Optimal</div>
+                            </div>
+                            <div class="task-check"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Bottom Timeline & Live Oscilloscope / FFT Waterfall Card -->
+        <section class="bottom-timeline-card">
+            <div class="timeline-header">
+                <div class="timeline-month-nav">
+                    <span class="cal-nav-btn">August</span>
+                    <span class="cal-current">September 2026</span>
+                    <span class="cal-nav-btn">October</span>
+                </div>
+                <div class="timeline-legend">
+                    <span class="leg-item"><span class="leg-dot live-cyan"></span> Live Micro-Vibration Trace</span>
+                    <span class="leg-item"><span class="leg-dot fft-gold"></span> 24-Band FFT Spectrum</span>
+                    <span class="leg-item"><span class="leg-dot alert-red"></span> Anomaly Marker</span>
+                </div>
+            </div>
+
+            <!-- Oscilloscope & FFT Canvas -->
+            <div class="oscilloscope-viewport">
+                <canvas id="live-stream-canvas" width="1200" height="150"></canvas>
+
+                <!-- Floating Diagnostic Event Pills along the timeline -->
+                <div class="floating-event-pill event-nominal" id="event-pill-1" style="left: 18%;">
+                    <div class="event-title">Baseline Nominal Lock</div>
+                    <div class="event-desc">F0: 48.5 Hz · Clean Sine Wave</div>
+                </div>
+
+                <div class="floating-event-pill event-anomaly" id="event-pill-2" style="left: 65%; display: none;">
+                    <div class="event-title">Critical Imbalance Anomaly</div>
+                    <div class="event-desc">+18 dB 1X Spike · Health 18%</div>
+                </div>
+            </div>
+
+            <!-- Timeline Time Markers -->
+            <div class="timeline-time-axis">
+                <span>00:00s</span>
+                <span>00:15s (Exam Start)</span>
+                <span>00:30s (Nominal State)</span>
+                <span>00:45s (Fault Induced)</span>
+                <span>01:00s (Diagnosis Complete)</span>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Scripts -->
+    <script src="app.js"></script>
+</body>
+</html>
