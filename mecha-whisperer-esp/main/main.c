@@ -18,9 +18,9 @@
 #include "dsp_engine.h"
 #include "ui_engine.h"
 #include "wifi_ble_manager.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "mecha_whisperer";
-
 #define BOOT_BUTTON_GPIO     GPIO_NUM_0
 #define IMU_SAMPLE_PERIOD_MS 4     // 250 Hz sampling rate
 #define DSP_PERIOD_MS        20    // 50 Hz DSP & UI refresh rate
@@ -28,6 +28,86 @@ static const char *TAG = "mecha_whisperer";
 
 static qmi8658_dev_t s_imu = {0};
 static bool s_imu_ready = false;
+
+/*
+ * Handles control payloads arriving from any transport: USB serial lines,
+ * WebSocket text frames, POST /api/control bodies and BLE characteristic
+ * writes. Accepts both the bare serial form ("CALIB") and the JSON form
+ * ({"command":"SET_FAULT","param":"bearing"}).
+ */
+static void handle_control_command(const char *payload) {
+    if (!payload) return;
+
+    if (strstr(payload, "CALIB")) {
+        ESP_LOGI(TAG, "Control: starting calibration");
+        dsp_engine_set_demo_mode(false);
+        dsp_engine_start_calibration(128);
+        return;
+    }
+
+    if (strstr(payload, "unbalance")) {
+        ESP_LOGI(TAG, "Control: forcing unbalance fault");
+        dsp_engine_set_demo_mode(true);
+        dsp_engine_set_demo_fault(STATE_CRITICAL_UNBALANCE);
+        return;
+    }
+
+    if (strstr(payload, "bearing")) {
+        ESP_LOGI(TAG, "Control: forcing bearing fault");
+        dsp_engine_set_demo_mode(true);
+        dsp_engine_set_demo_fault(STATE_BEARING_DAMAGE);
+        return;
+    }
+
+    if (strstr(payload, "healthy")) {
+        ESP_LOGI(TAG, "Control: forcing healthy state");
+        dsp_engine_set_demo_mode(true);
+        dsp_engine_set_demo_fault(STATE_HEALTHY);
+        return;
+    }
+
+    if (strstr(payload, "TOGGLE_DEMO")) {
+        bool enabled = !dsp_engine_is_demo_mode();
+        ESP_LOGI(TAG, "Control: demo mode %s", enabled ? "on" : "off");
+        dsp_engine_set_demo_mode(enabled);
+        return;
+    }
+
+    if (strstr(payload, "LIVE")) {
+        ESP_LOGI(TAG, "Control: returning to live IMU data");
+        dsp_engine_set_demo_mode(false);
+        return;
+    }
+}
+
+// Reads newline-delimited commands from the USB-C console (Web Serial / Python bridge).
+static void serial_command_task(void *arg) {
+    char line[96];
+    size_t len = 0;
+
+    while (true) {
+        int c = fgetc(stdin);
+        if (c == EOF) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
+        if (c == '\n' || c == '\r') {
+            if (len > 0) {
+                line[len] = '\0';
+                handle_control_command(line);
+                len = 0;
+            }
+            continue;
+        }
+
+        if (len < sizeof(line) - 1) {
+            line[len++] = (char)c;
+        } else {
+            len = 0; // Overlong line, drop it.
+        }
+    }
+}
 
 static float s_vibration_ring[BUFFER_SIZE];
 static size_t s_ring_idx = 0;
@@ -132,8 +212,8 @@ void app_main(void) {
     }
     bsp_display_brightness_set(100);
 
-    // 2. Initialize Wireless Wi-Fi SoftAP & WebSocket Server
-    wifi_ble_manager_init();
+    // 2. Initialize Wireless Wi-Fi SoftAP, WebSocket Server & BLE Peripheral
+    wifi_ble_manager_init(handle_control_command);
 
     // 3. Initialize IMU
     bsp_i2c_init();
@@ -151,6 +231,16 @@ void app_main(void) {
 
     // 5. Start high-speed IMU sampling task on Core 0
     xTaskCreatePinnedToCore(imu_sampler_task, "imu_task", 4096, NULL, 5, NULL, 0);
+
+    // 5b. Listen for USB-C serial control commands
+    xTaskCreate(serial_command_task, "serial_cmd", 3072, NULL, 3, NULL);
+
+    // Wi-Fi, BLE and the AMOLED SPI DMA all compete for internal DRAM on this
+    // board, so surface the headroom that actually matters at boot.
+    ESP_LOGI(TAG, "Heap: internal=%u B, DMA-capable=%u B, PSRAM=%u B",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     // 6. Main UI & DSP Loop
     static bool s_btn_last_state = true;
@@ -195,9 +285,9 @@ void app_main(void) {
         uint32_t now = esp_timer_get_time() / 1000;
         if (now - last_log >= 100) {
             last_log = now;
-            char json_buf[192];
-            snprintf(json_buf, sizeof(json_buf),
-                   "{\"rpm\":%lu,\"f0\":%.1f,\"rms\":%.3f,\"kurt\":%.2f,\"iso\":%.2f,\"score\":%d,\"state\":%d,\"view\":%d}\n",
+            char json_buf[512];
+            int n = snprintf(json_buf, sizeof(json_buf),
+                   "{\"rpm\":%lu,\"f0\":%.1f,\"rms\":%.3f,\"kurt\":%.2f,\"iso\":%.2f,\"score\":%d,\"state\":%d,\"view\":%d,\"visualSpectrum\":[",
                    (unsigned long)metrics->estimated_rpm,
                    metrics->peak_freq_hz,
                    metrics->rms_acceleration_g,
@@ -206,6 +296,15 @@ void app_main(void) {
                    metrics->health_score,
                    (int)metrics->state,
                    (int)ui_engine_get_view());
+
+            for (int i = 0; i < BARS_COUNT && n > 0 && n < (int)sizeof(json_buf) - 8; i++) {
+                n += snprintf(json_buf + n, sizeof(json_buf) - n, "%s%.3f",
+                              i ? "," : "", metrics->visual_spectrum[i]);
+            }
+            if (n > 0 && n < (int)sizeof(json_buf) - 4) {
+                snprintf(json_buf + n, sizeof(json_buf) - n, "]}\n");
+            }
+
             printf("%s", json_buf);
             wifi_ble_broadcast_telemetry(json_buf);
         }

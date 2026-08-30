@@ -1,18 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
-import { X, Wifi, Bluetooth, Usb, Play, CheckCircle2, AlertCircle, Radio, ArrowRight, Smartphone } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { X, Wifi, Bluetooth, Usb, Play, AlertCircle, Radio, ArrowRight, Loader2 } from "lucide-react";
 
 interface ConnectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   isConnected: boolean;
   connectionMode: "backend_ws" | "web_serial" | "bluetooth" | "wifi_ws" | "simulation";
-  onConnectWebSerial: () => void;
-  onConnectBluetooth: () => void;
-  onConnectWiFi: (ip: string) => void;
-  onConnectSimulator: () => void;
-  onDisconnect: () => void;
+  connectionError?: string | null;
+  onConnectWebSerial: () => void | Promise<void>;
+  onConnectBluetooth: () => void | Promise<void>;
+  onConnectWiFi: (ip: string) => void | Promise<void>;
+  onConnectSimulator: () => void | Promise<void>;
+  onDisconnect: () => void | Promise<void>;
 }
 
 export const ConnectionModal: React.FC<ConnectionModalProps> = ({
@@ -20,6 +21,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   onClose,
   isConnected,
   connectionMode,
+  connectionError,
   onConnectWebSerial,
   onConnectBluetooth,
   onConnectWiFi,
@@ -28,6 +30,54 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 }) => {
   const [wifiIP, setWifiIP] = useState("192.168.4.1");
   const [activeTab, setActiveTab] = useState<"ble" | "wifi" | "usb" | "sim">("wifi");
+  const [status, setStatus] = useState<"idle" | "pending">("idle");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Close only once the transport actually reports a live link, so a failed
+  // pairing leaves the modal open with the reason visible.
+  useEffect(() => {
+    if (status !== "pending") return;
+    if (isConnected) {
+      setStatus("idle");
+      setLocalError(null);
+      onClose();
+    } else if (connectionError) {
+      setStatus("idle");
+    }
+  }, [status, isConnected, connectionError, onClose]);
+
+  useEffect(() => {
+    if (status !== "pending") return;
+    timeoutRef.current = setTimeout(() => {
+      setStatus("idle");
+      setLocalError("Timed out waiting for the device. Check power, pairing and network, then retry.");
+    }, 12000);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [status]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setStatus("idle");
+      setLocalError(null);
+    }
+  }, [isOpen]);
+
+  const attempt = async (fn: () => void | Promise<void>) => {
+    setLocalError(null);
+    setStatus("pending");
+    try {
+      await fn();
+    } catch (err: any) {
+      setStatus("idle");
+      setLocalError(err?.message || String(err));
+    }
+  };
+
+  const busy = status === "pending";
+  const shownError = localError || connectionError;
 
   if (!isOpen) return null;
 
@@ -77,6 +127,14 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
             >
               Disconnect
             </button>
+          </div>
+        )}
+
+        {/* Connection failure reason */}
+        {shownError && !isConnected && (
+          <div className="flex items-start gap-2 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-[11px] font-semibold leading-relaxed">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{shownError}</span>
           </div>
         )}
 
@@ -154,14 +212,13 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
             </div>
 
             <button
-              onClick={() => {
-                onConnectWiFi(wifiIP);
-                onClose();
-              }}
-              className="w-full py-3 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+              disabled={busy}
+              onClick={() => attempt(() => onConnectWiFi(wifiIP))}
+              className="w-full py-3 rounded-2xl bg-sky-600 hover:bg-sky-700 disabled:opacity-60 disabled:cursor-wait text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
             >
-              <span>Connect via Wi-Fi (ws://{wifiIP}/ws)</span>
-              <ArrowRight className="w-4 h-4" />
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              <span>{busy ? "Connecting..." : `Connect via Wi-Fi (ws://${wifiIP}/ws)`}</span>
+              {!busy && <ArrowRight className="w-4 h-4" />}
             </button>
           </div>
         )}
@@ -180,14 +237,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
             </div>
 
             <button
-              onClick={() => {
-                onConnectBluetooth();
-                onClose();
-              }}
-              className="w-full py-3.5 rounded-2xl bg-[#1C1F26] hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+              disabled={busy}
+              onClick={() => attempt(onConnectBluetooth)}
+              className="w-full py-3.5 rounded-2xl bg-[#1C1F26] hover:bg-black disabled:opacity-60 disabled:cursor-wait text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
             >
-              <Bluetooth className="w-4 h-4 text-[#F5C544]" />
-              <span>Scan & Pair Bluetooth Stethoscope</span>
+              {busy ? <Loader2 className="w-4 h-4 animate-spin text-[#F5C544]" /> : <Bluetooth className="w-4 h-4 text-[#F5C544]" />}
+              <span>{busy ? "Pairing..." : "Scan & Pair Bluetooth Stethoscope"}</span>
             </button>
           </div>
         )}
@@ -206,14 +261,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
             </div>
 
             <button
-              onClick={() => {
-                onConnectWebSerial();
-                onClose();
-              }}
-              className="w-full py-3 rounded-2xl bg-[#1C1F26] hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+              disabled={busy}
+              onClick={() => attempt(onConnectWebSerial)}
+              className="w-full py-3 rounded-2xl bg-[#1C1F26] hover:bg-black disabled:opacity-60 disabled:cursor-wait text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
             >
-              <Usb className="w-4 h-4" />
-              <span>Pair USB-C Port (/dev/cu.usbmodem)</span>
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Usb className="w-4 h-4" />}
+              <span>{busy ? "Opening port..." : "Pair USB-C Port (/dev/cu.usbmodem)"}</span>
             </button>
           </div>
         )}

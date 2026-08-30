@@ -3,11 +3,11 @@
 #include "lvgl.h"
 
 typedef enum {
-    VIEW_ACOUSTIC_ECG_VU = 0,    // View 1: Mic / Acoustic Pulse (ECG pulse + Segmented VU Meter)
-    VIEW_VIBRATION_TRANSDUCER,   // View 2: IMU Vibration (Dual Spline + Harmonic Goal Bars + Fluid Tank)
-    VIEW_GYRO_TACHOMETER,        // View 3: Gyroscope Dynamics (Tachometer Arc Gauge + Angular Rate)
-    VIEW_TRIPLE_RINGS_MATRIX,    // View 4: Multi-Sensor Health (Triple Activity Rings + Dot Matrix Heatmap)
-    VIEW_BOLD_DIAGNOSTICS,       // View 5: Bold Typography & Diagnosis (Progress Arc + Giant Neon Readouts)
+    VIEW_SINE_WAVE_TRANSDUCER = 0, // View 1: Multi-chromatic glowing sine waves (Hero Default)
+    VIEW_FFT_SPECTRUM,             // View 2: 24-Band FFT Spectral Equalizer & Harmonics
+    VIEW_KURTOSIS_IMPACT,          // View 3: Kurtosis & Impulse Shock History
+    VIEW_TRIPLE_ACTIVITY_RINGS,    // View 4: Concentric Activity Rings & Health Score
+    VIEW_BOLD_DIAGNOSTICS,         // View 5: Bold Diagnosis & ISO 10816 Evaluation
     VIEW_MAX_COUNT
 } ui_view_mode_t;
 

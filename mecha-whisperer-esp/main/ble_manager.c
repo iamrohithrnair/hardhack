@@ -54,7 +54,7 @@ static bool s_ble_ready = false;
 static ble_command_cb_t s_command_cb = NULL;
 static SemaphoreHandle_t s_client_mutex = NULL;
 
-static char s_last_telemetry[224] =
+static char s_last_telemetry[512] =
     "{\"rpm\":2910,\"f0\":48.5,\"rms\":0.082,\"kurt\":2.94,\"iso\":0.16,\"score\":98,\"state\":1}\n";
 
 static void ble_advertise(void);

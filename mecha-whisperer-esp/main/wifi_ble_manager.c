@@ -1,5 +1,7 @@
 #include "wifi_ble_manager.h"
 #include <string.h>
+#include <unistd.h>
+#include "lwip/sockets.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -23,7 +25,7 @@ static int s_ws_fds[MAX_WS_CLIENTS] = {-1, -1, -1, -1};
 static SemaphoreHandle_t s_ws_mutex = NULL;
 static SemaphoreHandle_t s_telemetry_mutex = NULL;
 static wifi_command_cb_t s_command_cb = NULL;
-static char s_latest_telemetry[224] = "{\"rpm\":2910,\"f0\":48.5,\"rms\":0.082,\"kurt\":2.94,\"iso\":0.16,\"score\":98,\"state\":1}";
+static char s_latest_telemetry[512] = "{\"rpm\":2910,\"f0\":48.5,\"rms\":0.082,\"kurt\":2.94,\"iso\":0.16,\"score\":98,\"state\":1}";
 
 // Embedded Standalone Mobile/Desktop Dashboard HTML
 static const char INDEX_HTML[] = 
@@ -246,7 +248,8 @@ static httpd_handle_t start_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.ctrl_port = 32768;
-    config.max_open_sockets = 10;
+    // Must stay <= CONFIG_LWIP_MAX_SOCKETS - 3; the HTTP server reserves 3 internally.
+    config.max_open_sockets = 7;
     config.lru_purge_enable = true;
     config.close_fn = http_close_fn;
     config.recv_wait_timeout = 10;

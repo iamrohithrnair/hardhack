@@ -27,6 +27,7 @@ export default function DashboardPage() {
     telemetry,
     isConnected,
     connectionMode,
+    connectionError,
     isExamRunning,
     examSeconds,
     soundEnabled,
@@ -198,6 +199,7 @@ export default function DashboardPage() {
           onClose={() => setIsConnectionModalOpen(false)}
           connectionMode={connectionMode}
           isConnected={isConnected}
+          connectionError={connectionError}
           onConnectWebSerial={connectWebSerial}
           onConnectBluetooth={connectBluetooth}
           onConnectWiFi={(ip) => connectWiFi(ip)}
