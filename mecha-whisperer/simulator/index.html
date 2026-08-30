@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MECHA-WHISPERER: The Stethoscope for Machines (AMOLED Live Simulator)</title>
+    <style>
+        :root {
+            --bg-color: #0d0f14;
+            --panel-bg: #161922;
+            --amoled-black: #000000;
+            --neon-cyan: #00f0ff;
+            --neon-green: #00ff88;
+            --alert-orange: #ff9100;
+            --alert-red: #ff1744;
+            --caution-amber: #ffd600;
+            --magenta-trace: #ff00ff;
+            --gray-border: #2a2e3d;
+            --text-dim: #7e869e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: #ffffff;
+            display: flex;
+            min-height: 100vh;
+            padding: 24px;
+            gap: 32px;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        /* Left Column: Device Frame */
+        .device-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .device-chassis {
+            width: 408px;
+            height: 512px;
+            background: linear-gradient(145deg, #252834, #12141a);
+            border-radius: 28px;
+            padding: 20px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8),
+                        0 0 0 2px rgba(255, 255, 255, 0.08),
+                        inset 0 2px 4px rgba(255, 255, 255, 0.15);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        .device-chassis::after {
+            content: "WAVESHARE ESP32-S3 TOUCH AMOLED 1.8\"";
+            position: absolute;
+            bottom: 6px;
+            font-size: 8px;
+            letter-spacing: 1.5px;
+            color: rgba(255, 255, 255, 0.3);
+            text-transform: uppercase;
+        }
+
+        /* The 368 x 448 AMOLED Screen */
+        .screen-bezel {
+            width: 368px;
+            height: 448px;
+            background-color: var(--amoled-black);
+            border-radius: 14px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* Right Column: Controls & Demo Pitch Assistant */
+        .control-panel {
+            max-width: 540px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .panel-card {
+            background-color: var(--panel-bg);
+            border-radius: 16px;
+            padding: 20px;
+            border: 1px solid var(--gray-border);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: var(--neon-cyan);
+            text-transform: uppercase;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .action-btn {
+            background-color: #1e222d;
+            border: 1px solid var(--gray-border);
+            color: #ffffff;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .action-btn:hover {
+            border-color: var(--neon-cyan);
+            background-color: rgba(0, 240, 255, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .action-btn.active-healthy {
+            border-color: var(--neon-cyan);
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(0, 255, 136, 0.1));
+            color: var(--neon-cyan);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+        }
+
+        .action-btn.active-fault {
+            border-color: var(--alert-red);
+            background: linear-gradient(135deg, rgba(255, 23, 68, 0.25), rgba(255, 145, 0, 0.15));
+            color: var(--alert-red);
+            box-shadow: 0 0 20px rgba(255, 23, 68, 0.4);
+        }
+
+        .action-btn .btn-desc {
+            font-size: 10px;
+            color: var(--text-dim);
+            font-weight: 400;
+        }
+
+        /* Timeline Guide for 1-Minute Pitch */
+        .timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .timeline-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.02);
+            border-left: 3px solid #3a3f52;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .timeline-step:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .timeline-step.active {
+            border-left-color: var(--neon-cyan);
+            background: rgba(0, 240, 255, 0.06);
+        }
+
+        .timeline-time {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--neon-cyan);
+            min-width: 50px;
+        }
+
+        .timeline-body {
+            font-size: 12px;
+            line-height: 1.4;
+            color: #d1d5db;
+        }
+
+        .timeline-body strong {
+            color: #ffffff;
+        }
+
+        /* AMOLED Screen UI Elements */
+        #amoled-canvas {
+            display: block;
+            width: 368px;
+            height: 448px;
+        }
+
+        .audio-meter {
+            height: 6px;
+            background: #222;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 6px;
+        }
+
+        .audio-bar {
+            height: 100%;
+            width: 40%;
+            background: linear-gradient(90deg, var(--neon-green), var(--alert-orange), var(--alert-red));
+            transition: width 0.1s;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Left Column: Virtual AMOLED Device Frame -->
+    <div class="device-container">
+        <div class="device-chassis">
+            <div class="screen-bezel" id="screen-bezel">
+                <canvas id="amoled-canvas" width="368" height="448"></canvas>
+            </div>
+        </div>
+        <div style="font-size: 11px; color: var(--text-dim); text-align: center;">
+            💡 Tap bottom buttons [CALIB] [MODE] [DEMO] [AUDIO] on screen or use controls
+        </div>
+    </div>
+
+    <!-- Right Column: Interactive Pitch Assistant & Hardware Controls -->
+    <div class="control-panel">
+        
+        <div class="panel-card">
+            <div class="panel-title">
+                <span>⚡ Live Machine Simulation Modes</span>
+                <span id="sound-indicator" style="font-size: 10px; color: var(--neon-green);">🔊 SOUND SYNTH ON</span>
+            </div>
+            <div class="btn-grid">
+                <button class="action-btn active-healthy" id="btn-normal" onclick="setMachineState('healthy')">
+                    <span>🟢 1. Healthy Desk Fan</span>
+                    <span class="btn-desc">Smooth rhythmic rotation (48.5 Hz, 2910 RPM)</span>
+                </button>
+                <button class="action-btn" id="btn-unbalance" onclick="setMachineState('unbalance')">
+                    <span>🔴 2. Tape / Blu-Tack Blade</span>
+                    <span class="btn-desc">Critical 1X Imbalance (+18dB harmonic)</span>
+                </button>
+                <button class="action-btn" id="btn-bearing" onclick="setMachineState('bearing')">
+                    <span>🟠 3. Damaged Ball Bearing</span>
+                    <span class="btn-desc">Impulsive race spalling (Kurtosis: 8.5)</span>
+                </button>
+                <button class="action-btn" id="btn-loose" onclick="setMachineState('loose')">
+                    <span>🟡 4. Loose Chassis Mount</span>
+                    <span class="btn-desc">Subharmonic rattle (0.5X sub-peak)</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-title">
+                <span>⏱️ 1-Minute Live Demo Walkthrough</span>
+                <span style="font-size: 10px; color: var(--text-dim);">CLICK STEP TO TRIGGER</span>
+            </div>
+            <div class="timeline">
+                <div class="timeline-step active" id="step-1" onclick="runDemoStep(1)">
+                    <div class="timeline-time">00-15s</div>
+                    <div class="timeline-body">
+                        <strong>The Setup:</strong> Place desk fan on table. Turn it on. "Cameras can't see bearing wear. We listen to the micro-vibrations."
+                    </div>
+                </div>
+                <div class="timeline-step" id="step-2" onclick="runDemoStep(2)">
+                    <div class="timeline-time">15-30s</div>
+                    <div class="timeline-body">
+                        <strong>Healthy Check:</strong> Press Mecha-Whisperer against fan. Screen glows <strong>Cyan Blue</strong> with a smooth, rhythmic sine wave. "Health: 98% (ISO Class A)."
+                    </div>
+                </div>
+                <div class="timeline-step" id="step-3" onclick="runDemoStep(3)">
+                    <div class="timeline-time">30-45s</div>
+                    <div class="timeline-body">
+                        <strong>Simulate Failure:</strong> Stick Blu-Tack onto one fan blade. Fan turns on off-balance.
+                    </div>
+                </div>
+                <div class="timeline-step" id="step-4" onclick="runDemoStep(4)">
+                    <div class="timeline-time">45-60s</div>
+                    <div class="timeline-body">
+                        <strong>The Anomaly:</strong> Press device again. Screen flashes <strong>Aggressive Red</strong>. Waveform violently distorts. "Health drops to 18%. Predictive failure before collapse."
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-title">
+                <span>📊 Live Hardware Telemetry</span>
+                <span id="telemetry-mode" style="color: var(--neon-cyan);">IMU 1000Hz + MIC 16kHz</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; font-size: 12px;">
+                <div>
+                    <div style="color: var(--text-dim);">Fundamental F0:</div>
+                    <div id="stat-f0" style="font-size: 15px; font-weight: 700; color: var(--neon-cyan);">48.5 Hz</div>
+                </div>
+                <div>
+                    <div style="color: var(--text-dim);">Vibration RMS:</div>
+                    <div id="stat-rms" style="font-size: 15px; font-weight: 700; color: #fff;">0.082 g</div>
+                </div>
+                <div>
+                    <div style="color: var(--text-dim);">Kurtosis (Impacts):</div>
+                    <div id="stat-kurt" style="font-size: 15px; font-weight: 700; color: var(--neon-green);">2.94</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- JavaScript AMOLED Canvas Renderer & Web Audio DSP Synthesizer -->
+    <script>
+        const canvas = document.getElementById('amoled-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // State variables
+        let machineMode = 'healthy'; // 'healthy', 'unbalance', 'bearing', 'loose'
+        let currentScreen = 0; // 0: Main HUD, 1: Spectrum Zoom, 2: ISO Report, 3: Audio Stethoscope
+        let audioPassthrough = false;
+        let isCalibrating = false;
+        let calibCount = 0;
+
+        // Metrics
+        let healthScore = 98;
+        let anomalyIndex = 2.0;
+        let peakFreq = 48.5;
+        let rpm = 2910;
+        let rmsAccel = 0.082;
+        let kurtosis = 2.94;
+        let peakToPeak = 0.24;
+        let isoVelocity = 0.62;
+        let acousticDb = 46.2;
+        let thd = 3.2;
+
+        // Visual spectrum & waveform
+        const BARS = 24;
+        let spectrum = new Array(BARS).fill(0.05);
+        let spectrumPeaks = new Array(BARS).fill(0.05);
+        let acousticSpectrum = new Array(BARS).fill(0.05);
+        let waveHistory = new Array(180).fill(0);
+        let phase = 0;
+
+        // Web Audio API for Real Mechanical Stethoscope Feedback
+        let audioCtx = null;
+        let oscNode = null;
+        let noiseNode = null;
+        let gainNode = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Motor hum oscillator
+                oscNode = audioCtx.createOscillator();
+                oscNode.type = 'sawtooth';
+                oscNode.frequency.setValueAtTime(peakFreq, audioCtx.currentTime);
+
+                // Lowpass filter for deep motor thrum
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(160, audioCtx.currentTime);
+
+                gainNode = audioCtx.createGain();
+                gainNode.gain.setValueAtTime(0.04, audioCtx.currentTime);
+
+                oscNode.connect(filter);
+                filter.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                oscNode.start();
+            }
+        }
+
+        function updateAudioPitch() {
+            if (!audioCtx) return;
+            if (machineMode === 'healthy') {
+                oscNode.frequency.setTargetAtTime(48.5, audioCtx.currentTime, 0.1);
+                gainNode.gain.setTargetAtTime(0.03, audioCtx.currentTime, 0.1);
+            } else if (machineMode === 'unbalance') {
+                oscNode.frequency.setTargetAtTime(48.5, audioCtx.currentTime, 0.1);
+                gainNode.gain.setTargetAtTime(0.12, audioCtx.currentTime, 0.05);
+            } else if (machineMode === 'bearing') {
+                oscNode.frequency.setTargetAtTime(120, audioCtx.currentTime, 0.1);
+                gainNode.gain.setTargetAtTime(0.08, audioCtx.currentTime, 0.05);
+            } else {
+                oscNode.frequency.setTargetAtTime(24.2, audioCtx.currentTime, 0.1);
+                gainNode.gain.setTargetAtTime(0.09, audioCtx.currentTime, 0.1);
+            }
+        }
+
+        // Mode Switching
+        function setMachineState(mode) {
+            initAudio();
+            machineMode = mode;
+            document.querySelectorAll('.action-btn').forEach(btn => {
+                btn.classList.remove('active-healthy', 'active-fault');
+            });
+
+            if (mode === 'healthy') {
+                document.getElementById('btn-normal').classList.add('active-healthy');
+            } else {
+                const btnId = mode === 'unbalance' ? 'btn-unbalance' : (mode === 'bearing' ? 'btn-bearing' : 'btn-loose');
+                document.getElementById(btnId).classList.add('active-fault');
+            }
+            updateAudioPitch();
+        }
+
+        function runDemoStep(step) {
+            document.querySelectorAll('.timeline-step').forEach(s => s.classList.remove('active'));
+            document.getElementById(`step-${step}`).classList.add('active');
+
+            if (step === 1 || step === 2) {
+                setMachineState('healthy');
+            } else if (step === 3 || step === 4) {
+                setMachineState('unbalance');
+            }
+        }
+
+        // Main Simulation Loop
+        function updatePhysics() {
+            phase += 0.15;
+
+            // Generate physics waveform & metrics based on state
+            let noise = (Math.random() - 0.5) * 0.04;
+            let sample = 0;
+
+            if (machineMode === 'healthy') {
+                healthScore = 98;
+                anomalyIndex = 2.0;
+                peakFreq = 48.5 + Math.sin(phase * 0.05) * 0.2;
+                rpm = Math.round(peakFreq * 60);
+                rmsAccel = 0.082 + Math.random() * 0.005;
+                kurtosis = 2.92 + Math.random() * 0.1;
+                peakToPeak = 0.24;
+                isoVelocity = 0.62;
+                acousticDb = 45.8 + Math.random() * 0.5;
+                thd = 3.2;
+
+                sample = 0.28 * Math.sin(phase) + noise;
+
+                // Spectral profile: smooth fundamental spike
+                for (let i = 0; i < BARS; i++) {
+                    let target = 0.04;
+                    if (i === 4) target = 0.75; // 48 Hz bin
+                    if (i === 8) target = 0.15; // 2X harmonic
+                    spectrum[i] = spectrum[i] * 0.8 + target * 0.2;
+                }
+            } else if (machineMode === 'unbalance') {
+                healthScore = 18;
+                anomalyIndex = 82.0;
+                peakFreq = 48.2 + Math.sin(phase * 0.1) * 0.8;
+                rpm = Math.round(peakFreq * 60);
+                rmsAccel = 1.48 + Math.random() * 0.1;
+                kurtosis = 3.4 + Math.random() * 0.2;
+                peakToPeak = 2.85;
+                isoVelocity = 6.42; // ISO Class D (Dangerous)
+                acousticDb = 72.4 + Math.random() * 2.0;
+                thd = 42.5;
+
+                // Violent wobbling modulation
+                let mod = 1.0 + 0.3 * Math.sin(phase * 0.2);
+                sample = 0.85 * Math.sin(phase) * mod + 0.35 * Math.sin(phase * 2) + noise * 4;
+
+                for (let i = 0; i < BARS; i++) {
+                    let target = 0.08;
+                    if (i === 4) target = 0.98; // Massive 1X spike
+                    if (i === 8) target = 0.65; // Massive 2X harmonic
+                    if (i === 12) target = 0.42; // 3X harmonic
+                    spectrum[i] = spectrum[i] * 0.8 + target * 0.2;
+                }
+            } else if (machineMode === 'bearing') {
+                healthScore = 32;
+                anomalyIndex = 68.0;
+                peakFreq = 48.5;
+                rpm = 2910;
+                rmsAccel = 0.48 + Math.random() * 0.05;
+                kurtosis = 8.6 + Math.random() * 1.5; // Massive impulsive kurtosis
+                peakToPeak = 1.95;
+                isoVelocity = 2.95;
+                acousticDb = 68.0 + Math.random() * 3.0;
+                thd = 28.0;
+
+                let impact = (Math.random() < 0.08) ? (Math.random() > 0.5 ? 0.9 : -0.9) : 0;
+                sample = 0.25 * Math.sin(phase) + impact + noise * 6;
+
+                for (let i = 0; i < BARS; i++) {
+                    let target = 0.1 + Math.random() * 0.2;
+                    if (i === 4) target = 0.5;
+                    if (i > 14) target = 0.65 + Math.random() * 0.3; // High frequency chatter
+                    spectrum[i] = spectrum[i] * 0.8 + target * 0.2;
+                }
+            } else {
+                // Loose mount
+                healthScore = 45;
+                anomalyIndex = 55.0;
+                peakFreq = 24.2; // Subharmonic
+                rpm = 2910;
+                rmsAccel = 0.82;
+                kurtosis = 4.1;
+                peakToPeak = 1.65;
+                isoVelocity = 3.8;
+                acousticDb = 62.0;
+
+                sample = 0.55 * Math.sin(phase * 0.5) + 0.35 * Math.sin(phase) + noise * 3;
+                for (let i = 0; i < BARS; i++) {
+                    let target = 0.06;
+                    if (i === 2) target = 0.82; // 0.5X subharmonic
+                    if (i === 4) target = 0.60; // 1X
+                    spectrum[i] = spectrum[i] * 0.8 + target * 0.2;
+                }
+            }
+
+            // Update peak hold decay
+            for (let i = 0; i < BARS; i++) {
+                if (spectrum[i] > spectrumPeaks[i]) {
+                    spectrumPeaks[i] = spectrum[i];
+                } else {
+                    spectrumPeaks[i] = Math.max(0, spectrumPeaks[i] - 0.015);
+                }
+                acousticSpectrum[i] = 0.7 * acousticSpectrum[i] + 0.3 * (spectrum[i] * 0.8 + Math.random() * 0.15);
+            }
+
+            // Shift oscilloscope buffer
+            waveHistory.shift();
+            waveHistory.push(sample);
+
+            // Update DOM telemetry
+            document.getElementById('stat-f0').innerText = peakFreq.toFixed(1) + ' Hz';
+            document.getElementById('stat-rms').innerText = rmsAccel.toFixed(3) + ' g';
+            document.getElementById('stat-kurt').innerText = kurtosis.toFixed(2);
+            document.getElementById('stat-kurt').style.color = kurtosis > 4.0 ? '#ff9100' : '#00ff88';
+        }
+
+        // AMOLED Canvas Renderer (Simulates exact 368 x 448 pixels)
+        function renderAMOLED() {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, 368, 448);
+
+            // State-based accent color
+            let stateColor = '#00f0ff';
+            let bgTint = 'rgba(0, 240, 255, 0.06)';
+            let statusText = 'STATUS: HEALTHY NOMINAL';
+
+            if (healthScore < 30) {
+                stateColor = '#ff1744';
+                bgTint = 'rgba(255, 23, 68, 0.15)';
+                statusText = 'CRITICAL: ROTOR IMBALANCE';
+            } else if (healthScore < 60) {
+                stateColor = '#ff9100';
+                bgTint = 'rgba(255, 145, 0, 0.12)';
+                statusText = machineMode === 'bearing' ? 'FAULT: BEARING IMPACTS' : 'WARN: MECHANICAL LOOSENESS';
+            }
+
+            // ==========================================
+            // 1. TOP STATUS BAR (y: 0 to 36)
+            // ==========================================
+            ctx.fillStyle = '#181b24';
+            ctx.fillRect(0, 0, 368, 36);
+            ctx.fillStyle = stateColor;
+            ctx.fillRect(0, 35, 368, 1.5);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 13px monospace';
+            ctx.fillText('MECHA-WHISPERER', 12, 22);
+
+            // Heartbeat dot
+            ctx.fillStyle = stateColor;
+            ctx.beginPath();
+            ctx.arc(245, 18, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#00f0ff';
+            ctx.font = '9px monospace';
+            ctx.fillText('BAT: 96%', 265, 14);
+            ctx.fillStyle = '#848484';
+            ctx.fillText('FPS: 60', 265, 26);
+
+            // ==========================================
+            // 2. MAIN DIAGNOSTIC CARD (y: 42 to 135)
+            // ==========================================
+            ctx.fillStyle = bgTint;
+            roundRect(ctx, 8, 42, 352, 92, 8, true, false);
+            ctx.strokeStyle = stateColor;
+            ctx.lineWidth = 1.5;
+            roundRect(ctx, 8, 42, 352, 92, 8, false, true);
+
+            // Health Arc Gauge
+            drawHealthGauge(ctx, 56, 88, 36, healthScore, stateColor);
+
+            // Text on right
+            ctx.fillStyle = '#8e96a8';
+            ctx.font = '10px monospace';
+            ctx.fillText('MACHINE HEALTH SCORE', 108, 56);
+
+            ctx.fillStyle = stateColor;
+            ctx.font = 'bold 28px monospace';
+            ctx.fillText(`${healthScore}%`, 108, 86);
+
+            ctx.fillStyle = (healthScore < 30) ? '#ff1744' : '#ffffff';
+            ctx.font = 'bold 10px monospace';
+            ctx.fillText(statusText, 108, 106);
+
+            ctx.fillStyle = '#00f0ff';
+            ctx.font = '10px monospace';
+            ctx.fillText(`F0: ${peakFreq.toFixed(1)} Hz (${rpm} RPM)`, 108, 122);
+
+            // ==========================================
+            // 3. OSCILLOSCOPE WAVEFORM (y: 140 to 264)
+            // ==========================================
+            ctx.fillStyle = '#0a0c10';
+            roundRect(ctx, 8, 140, 352, 124, 8, true, false);
+            ctx.strokeStyle = '#222736';
+            ctx.lineWidth = 1;
+            roundRect(ctx, 8, 140, 352, 124, 8, false, true);
+
+            ctx.fillStyle = '#8e96a8';
+            ctx.font = '9px monospace';
+            ctx.fillText('LIVE MICRO-VIBRATION STETHOSCOPE', 16, 154);
+            ctx.fillStyle = stateColor;
+            ctx.fillText(`Pk: ${peakToPeak.toFixed(2)}g`, 270, 154);
+
+            // Grid lines
+            ctx.strokeStyle = '#181d28';
+            ctx.beginPath();
+            ctx.moveTo(16, 202); ctx.lineTo(352, 202);
+            ctx.moveTo(16, 178); ctx.lineTo(352, 178);
+            ctx.moveTo(16, 226); ctx.lineTo(352, 226);
+            ctx.stroke();
+
+            // Trace
+            ctx.strokeStyle = stateColor;
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = stateColor;
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            for (let i = 0; i < waveHistory.length; i++) {
+                let x = 16 + (i / waveHistory.length) * 336;
+                let y = 202 - waveHistory[i] * 42;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.shadowBlur = 0; // reset glow
+
+            // ==========================================
+            // 4. FFT FREQUENCY BARS (y: 270 to 344)
+            // ==========================================
+            ctx.fillStyle = '#0a0c10';
+            roundRect(ctx, 8, 270, 352, 74, 8, true, false);
+            ctx.strokeStyle = '#222736';
+            roundRect(ctx, 8, 270, 352, 74, 8, false, true);
+
+            ctx.fillStyle = '#8e96a8';
+            ctx.font = '9px monospace';
+            ctx.fillText('VIBRATION FFT SPECTRUM (0 - 500 Hz)', 16, 282);
+
+            let barW = (336 - (BARS - 1) * 3) / BARS;
+            for (let i = 0; i < BARS; i++) {
+                let bx = 16 + i * (barW + 3);
+                let bh = spectrum[i] * 50;
+                let by = 336 - bh;
+
+                ctx.fillStyle = stateColor;
+                ctx.fillRect(bx, by, barW, bh);
+
+                // Peak line
+                let ph = spectrumPeaks[i] * 50;
+                let py = 336 - ph;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(bx, py, barW, 1.5);
+            }
+
+            // ==========================================
+            // 5. METRICS ROW (y: 350 to 392)
+            // ==========================================
+            let cardW = (352 - 12) / 3;
+
+            drawMiniCard(ctx, 8, 350, cardW, 42, 'RMS ACCEL', `${rmsAccel.toFixed(2)}g`, '#ffffff');
+            drawMiniCard(ctx, 8 + cardW + 6, 350, cardW, 42, 'KURTOSIS', `${kurtosis.toFixed(1)}`, kurtosis > 4 ? '#ff9100' : '#ffffff');
+            drawMiniCard(ctx, 8 + (cardW + 6) * 2, 350, cardW, 42, 'ISO-10816', 
+                isoVelocity < 1.12 ? 'CLS A' : (isoVelocity < 2.8 ? 'CLS B' : 'CLS D'), 
+                isoVelocity < 1.12 ? '#00ff88' : (isoVelocity < 2.8 ? '#ffd600' : '#ff1744'));
+
+            // ==========================================
+            // 6. BOTTOM TOUCH NAVIGATION BAR (y: 398 to 442)
+            // ==========================================
+            let btnW = (352 - 18) / 4;
+            drawNavButton(ctx, 8, 400, btnW, 38, 'CALIB', isCalibrating ? '#00f0ff' : '#2a3042', '#00f0ff', isCalibrating);
+            drawNavButton(ctx, 8 + btnW + 6, 400, btnW, 38, 'MODE', '#2a3042', '#ffffff', false);
+            drawNavButton(ctx, 8 + (btnW + 6) * 2, 400, btnW, 38, 'DEMO', machineMode !== 'healthy' ? '#ff9100' : '#2a3042', '#ff9100', machineMode !== 'healthy');
+            drawNavButton(ctx, 8 + (btnW + 6) * 3, 400, btnW, 38, 'AUDIO', audioPassthrough ? '#ff00ff' : '#2a3042', '#ff00ff', audioPassthrough);
+        }
+
+        function drawHealthGauge(ctx, cx, cy, r, score, color) {
+            ctx.strokeStyle = '#222736';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 5;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 6;
+            ctx.beginPath();
+            let start = -Math.PI / 2;
+            let end = start + (score / 100) * Math.PI * 2;
+            ctx.arc(cx, cy, r, start, end);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawMiniCard(ctx, x, y, w, h, label, val, valColor) {
+            ctx.fillStyle = '#161924';
+            roundRect(ctx, x, y, w, h, 6, true, false);
+            ctx.fillStyle = '#7e869e';
+            ctx.font = '8px monospace';
+            ctx.fillText(label, x + 8, y + 14);
+            ctx.fillStyle = valColor;
+            ctx.font = 'bold 15px monospace';
+            ctx.fillText(val, x + 8, y + 33);
+        }
+
+        function drawNavButton(ctx, x, y, w, h, label, bg, border, active) {
+            ctx.fillStyle = active ? border : bg;
+            roundRect(ctx, x, y, w, h, 6, true, false);
+            ctx.strokeStyle = border;
+            ctx.lineWidth = 1;
+            roundRect(ctx, x, y, w, h, 6, false, true);
+
+            ctx.fillStyle = active ? '#000000' : border;
+            ctx.font = 'bold 10px monospace';
+            let txtW = ctx.measureText(label).width;
+            ctx.fillText(label, x + (w - txtW) / 2, y + 23);
+        }
+
+        function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+            if (fill) ctx.fill();
+            if (stroke) ctx.stroke();
+        }
+
+        // Handle Touch Clicks on Virtual Screen
+        canvas.addEventListener('click', (e) => {
+            initAudio();
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Check bottom buttons
+            if (y >= 398 && y <= 442) {
+                let btnW = (352 - 18) / 4;
+                if (x >= 8 && x < 8 + btnW) {
+                    // CALIB
+                    isCalibrating = true;
+                    setTimeout(() => { isCalibrating = false; }, 1500);
+                } else if (x >= 8 + btnW + 6 && x < 8 + (btnW + 6) * 2) {
+                    // MODE
+                    currentScreen = (currentScreen + 1) % 4;
+                } else if (x >= 8 + (btnW + 6) * 2 && x < 8 + (btnW + 6) * 3) {
+                    // DEMO
+                    if (machineMode === 'healthy') setMachineState('unbalance');
+                    else setMachineState('healthy');
+                } else if (x >= 8 + (btnW + 6) * 3) {
+                    // AUDIO
+                    audioPassthrough = !audioPassthrough;
+                }
+            }
+        });
+
+        // Animation Loop
+        function animate() {
+            updatePhysics();
+            renderAMOLED();
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# Build outputs
+build/
+**/build/
+managed_components/
+**/managed_components/
+dependencies.lock
+**/dependencies.lock
+sdkconfig.old
+**/sdkconfig.old
+
+# PlatformIO
+.pio/
+**/ .pio/
+
+# OS files
+.DS_Store
+*.DS_Store
+Thumbs.db
+
+# Cloned reference repos
+waveshare-repo/
