@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-warm: #FBF8F1;
+    --bg-warm-secondary: #F5EFE6;
+    --card-bg: #FFFFFF;
+    --dark-card-bg: #1C1F26;
+    --accent-gold: #F5C544;
+    --accent-gold-dark: #D4A322;
+    --text-primary: #12141A;
+    --text-secondary: #6B7280;
+  }
+
+  body {
+    background: radial-gradient(circle at 10% 10%, #FFFDF9 0%, #FBF8F1 50%, #F5EFE6 100%);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
