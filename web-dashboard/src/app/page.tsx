@@ -13,6 +13,7 @@ import { OscilloscopeTimelineCard } from "../components/OscilloscopeTimelineCard
 import { GraphGalleryStudio } from "../components/GraphGalleryStudio";
 import { AIDiagnosticModal } from "../components/AIDiagnosticModal";
 import { DeviceCustomizerModal } from "../components/DeviceCustomizerModal";
+import { CustomDeviceProfilerModal } from "../components/CustomDeviceProfilerModal";
 import { ConnectionModal } from "../components/ConnectionModal";
 
 // Tab Views
@@ -44,6 +45,7 @@ export default function DashboardPage() {
   const [currentMachine, setCurrentMachine] = useState<MachineProfile>(DEFAULT_MACHINES[0]);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
+  const [isCustomProfilerOpen, setIsCustomProfilerOpen] = useState(false);
   const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
 
   return (
@@ -64,7 +66,12 @@ export default function DashboardPage() {
         />
 
         {/* Hero Section */}
-        <HeroSection telemetry={telemetry} machine={currentMachine} />
+        <HeroSection
+          telemetry={telemetry}
+          machine={currentMachine}
+          onOpenCustomizer={() => setIsDeviceModalOpen(true)}
+          onOpenProfiler={() => setIsCustomProfilerOpen(true)}
+        />
 
         {/* Wireless Quick-Connect Floating Banner if Disconnected from USB */}
         {!isConnected && (
@@ -165,6 +172,7 @@ export default function DashboardPage() {
           isOpen={isAIModalOpen}
           onClose={() => setIsAIModalOpen(false)}
           telemetry={telemetry}
+          machine={currentMachine}
         />
 
         {/* Target Machine Customizer & Switcher Modal */}
@@ -173,6 +181,15 @@ export default function DashboardPage() {
           onClose={() => setIsDeviceModalOpen(false)}
           currentMachine={currentMachine}
           onSelectMachine={(m) => setCurrentMachine(m)}
+          onOpenAIProfiler={() => setIsCustomProfilerOpen(true)}
+        />
+
+        {/* Custom Device & Event AI Profiler Modal */}
+        <CustomDeviceProfilerModal
+          isOpen={isCustomProfilerOpen}
+          onClose={() => setIsCustomProfilerOpen(false)}
+          telemetry={telemetry}
+          onSaveProfile={(profile) => setCurrentMachine(profile)}
         />
 
         {/* Wireless Connection Selector Modal (BLE / Wi-Fi SoftAP / USB) */}

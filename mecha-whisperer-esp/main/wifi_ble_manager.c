@@ -246,8 +246,12 @@ static httpd_handle_t start_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.ctrl_port = 32768;
-    config.max_open_sockets = 7;
+    config.max_open_sockets = 10;
     config.lru_purge_enable = true;
+    config.close_fn = http_close_fn;
+    config.recv_wait_timeout = 10;
+    config.send_wait_timeout = 10;
+    config.stack_size = 6144;
 
     ESP_LOGI(TAG, "Starting HTTP/WebSocket server on port %d...", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -260,14 +264,22 @@ static httpd_handle_t start_webserver(void) {
         };
         httpd_register_uri_handler(server, &root_uri);
 
-        // Options pre-flight
-        httpd_uri_t options_uri = {
+        // CORS pre-flight for both REST endpoints
+        httpd_uri_t telemetry_options_uri = {
             .uri        = "/api/telemetry",
             .method     = HTTP_OPTIONS,
             .handler    = options_handler,
             .user_ctx   = NULL
         };
-        httpd_register_uri_handler(server, &options_uri);
+        httpd_register_uri_handler(server, &telemetry_options_uri);
+
+        httpd_uri_t control_options_uri = {
+            .uri        = "/api/control",
+            .method     = HTTP_OPTIONS,
+            .handler    = options_handler,
+            .user_ctx   = NULL
+        };
+        httpd_register_uri_handler(server, &control_options_uri);
 
         // REST /api/telemetry
         httpd_uri_t telemetry_uri = {
@@ -277,6 +289,15 @@ static httpd_handle_t start_webserver(void) {
             .user_ctx   = NULL
         };
         httpd_register_uri_handler(server, &telemetry_uri);
+
+        // REST /api/control
+        httpd_uri_t control_uri = {
+            .uri        = "/api/control",
+            .method     = HTTP_POST,
+            .handler    = control_post_handler,
+            .user_ctx   = NULL
+        };
+        httpd_register_uri_handler(server, &control_uri);
 
         // WebSocket /ws
         httpd_uri_t ws_uri = {
@@ -306,7 +327,14 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-esp_err_t wifi_ble_manager_init(void) {
+esp_err_t wifi_ble_manager_init(wifi_command_cb_t on_command) {
+    s_command_cb = on_command;
+    s_ws_mutex = xSemaphoreCreateMutex();
+    s_telemetry_mutex = xSemaphoreCreateMutex();
+    if (!s_ws_mutex || !s_telemetry_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+
     // 1. Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -337,51 +365,107 @@ esp_err_t wifi_ble_manager_init(void) {
             .channel = 1,
             .password = WIFI_AP_PASS,
             .max_connection = MAX_STA_CONN,
-            .authmode = WIFI_AUTH_OPEN
+            .authmode = WIFI_AUTH_OPEN,
+            .beacon_interval = 100,
+            .ssid_hidden = 0
         },
     };
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // Power save adds up to 100 ms of latency per frame, which stalls the
+    // 10 Hz telemetry stream. Keep the radio awake.
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20));
 
     ESP_LOGI(TAG, "=================================================");
     ESP_LOGI(TAG, "  Wi-Fi SoftAP Started: SSID='%s' IP=192.168.4.1", WIFI_AP_SSID);
     ESP_LOGI(TAG, "  Direct Web Dashboard at: http://192.168.4.1/");
     ESP_LOGI(TAG, "  REST Telemetry Stream at: http://192.168.4.1/api/telemetry");
+    ESP_LOGI(TAG, "  Live WebSocket Stream at: ws://192.168.4.1/ws");
     ESP_LOGI(TAG, "=================================================");
 
     // 4. Start HTTP / WebSocket Server
     s_http_server = start_webserver();
 
+    // 5. Start the BLE peripheral so Web Bluetooth clients can pair too
+    esp_err_t ble_ret = ble_manager_init(on_command);
+    if (ble_ret != ESP_OK) {
+        ESP_LOGW(TAG, "BLE peripheral unavailable (%s); Wi-Fi streaming still active",
+                 esp_err_to_name(ble_ret));
+    }
+
     return ESP_OK;
 }
 
 void wifi_ble_broadcast_telemetry(const char* json_str) {
-    if (!json_str || !s_http_server) return;
+    if (!json_str) return;
 
-    strncpy(s_latest_telemetry, json_str, sizeof(s_latest_telemetry) - 1);
-    s_latest_telemetry[sizeof(s_latest_telemetry) - 1] = '\0';
+    // Strip the trailing newline used by the serial protocol; WebSocket and REST
+    // consumers expect a bare JSON document.
+    char frame[sizeof(s_latest_telemetry)];
+    strlcpy(frame, json_str, sizeof(frame));
+    size_t len = strlen(frame);
+    while (len > 0 && (frame[len - 1] == '\n' || frame[len - 1] == '\r')) {
+        frame[--len] = '\0';
+    }
+    if (len == 0) return;
 
-    httpd_ws_frame_t ws_pkt;
-    memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
-    ws_pkt.type = HTTPD_WS_TYPE_TEXT;
-    ws_pkt.payload = (uint8_t*)json_str;
-    ws_pkt.len = strlen(json_str);
+    if (s_telemetry_mutex) {
+        xSemaphoreTake(s_telemetry_mutex, portMAX_DELAY);
+        memcpy(s_latest_telemetry, frame, len + 1);
+        xSemaphoreGive(s_telemetry_mutex);
+    }
 
+    ble_manager_notify_telemetry(frame);
+
+    if (!s_http_server || !s_ws_mutex) return;
+
+    int targets[MAX_WS_CLIENTS];
+    int target_count = 0;
+    xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++) {
-        if (s_ws_fds[i] != -1) {
-            esp_err_t ret = httpd_ws_send_frame_async(s_http_server, s_ws_fds[i], &ws_pkt);
-            if (ret != ESP_OK) {
-                s_ws_fds[i] = -1; // Client disconnected
-            }
+        if (s_ws_fds[i] != -1) targets[target_count++] = s_ws_fds[i];
+    }
+    xSemaphoreGive(s_ws_mutex);
+
+    for (int i = 0; i < target_count; i++) {
+        int fd = targets[i];
+
+        // A recycled fd may now belong to a plain HTTP socket; never frame onto it.
+        if (httpd_ws_get_fd_info(s_http_server, fd) != HTTPD_WS_CLIENT_WEBSOCKET) {
+            ws_client_unregister(fd);
+            continue;
+        }
+
+        httpd_ws_frame_t ws_pkt = {
+            .final = true,
+            .type = HTTPD_WS_TYPE_TEXT,
+            .payload = (uint8_t *)frame,
+            .len = len,
+        };
+
+        if (httpd_ws_send_frame_async(s_http_server, fd, &ws_pkt) != ESP_OK) {
+            ws_client_unregister(fd);
         }
     }
 }
 
 bool wifi_ble_has_clients(void) {
+    if (ble_manager_has_subscribers()) return true;
+    if (!s_ws_mutex) return false;
+
+    bool found = false;
+    xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++) {
-        if (s_ws_fds[i] != -1) return true;
+        if (s_ws_fds[i] != -1) {
+            found = true;
+            break;
+        }
     }
-    return false;
+    xSemaphoreGive(s_ws_mutex);
+    return found;
 }

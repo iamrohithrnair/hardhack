@@ -1,19 +1,22 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Sparkles, AlertTriangle, ShieldCheck, CheckCircle2, ArrowRight } from "lucide-react";
+import { X, Sparkles, AlertTriangle, ShieldCheck, CheckCircle2, ArrowRight, Bot } from "lucide-react";
 import { TelemetryData } from "../hooks/useDeviceStream";
+import { MachineProfile } from "../types/machine";
 
 interface AIDiagnosticModalProps {
   isOpen: boolean;
   onClose: () => void;
   telemetry: TelemetryData;
+  machine?: MachineProfile;
 }
 
 export const AIDiagnosticModal: React.FC<AIDiagnosticModalProps> = ({
   isOpen,
   onClose,
-  telemetry
+  telemetry,
+  machine
 }) => {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<any>(null);
@@ -26,7 +29,7 @@ export const AIDiagnosticModal: React.FC<AIDiagnosticModalProps> = ({
       const res = await fetch("/api/ai/diagnose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(telemetry)
+        body: JSON.stringify({ ...telemetry, machine })
       });
       const data = await res.json();
       if (data.success) {
@@ -57,89 +60,79 @@ export const AIDiagnosticModal: React.FC<AIDiagnosticModalProps> = ({
           </div>
           <div>
             <h2 className="text-xl font-extrabold text-[#12141A]">
-              AI Machine Doctor Diagnostic
+              AI Doctor & Anomaly Diagnostic
             </h2>
             <p className="text-xs text-[#6B7280]">
-              Real-time FFT Harmonics & ISO 10816 Copilot
+              Target: <strong className="text-[#12141A]">{machine?.name || "Asset"}</strong> ({machine?.category || "Industrial"})
             </p>
           </div>
         </div>
 
-        {/* Current Snapshot */}
-        <div className="grid grid-cols-3 gap-3 p-3.5 rounded-2xl bg-[#F9FAFB] border border-black/5">
-          <div>
-            <span className="text-[10px] text-[#9CA3AF] font-bold">HEALTH</span>
-            <div className="text-lg font-mono font-bold text-[#12141A]">{telemetry.score}%</div>
+        {/* Action button if no report yet */}
+        {!report && !loading && (
+          <div className="flex flex-col items-center justify-center gap-4 py-8 text-center bg-neutral-50 rounded-2xl p-6 border border-neutral-100">
+            <div className="w-14 h-14 rounded-full bg-[#1C1F26] text-[#F5C544] flex items-center justify-center shadow-md">
+              <Bot className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-[#12141A]">Ready for Multimodal Physical Audit</h3>
+              <p className="text-xs text-[#6B7280] max-w-md mt-1">
+                Gemini 3.7 & GPT-5.6 will analyze real-time spectral FFT harmonics, RMS energy ({telemetry.rms.toFixed(3)}g), and Kurtosis factor ({telemetry.kurt.toFixed(2)}) for <strong>{machine?.name}</strong>.
+              </p>
+            </div>
+            <button
+              onClick={handleGenerateReport}
+              className="px-6 py-3 rounded-full bg-[#1C1F26] hover:bg-black text-white font-bold text-sm shadow-md transition-all cursor-pointer flex items-center gap-2"
+            >
+              <Sparkles className="w-4 h-4 text-[#F5C544]" />
+              Run Full AI Diagnosis
+            </button>
           </div>
-          <div>
-            <span className="text-[10px] text-[#9CA3AF] font-bold">1X RPM PEAK</span>
-            <div className="text-lg font-mono font-bold text-[#0EA5E9]">{telemetry.f0.toFixed(1)} Hz</div>
-          </div>
-          <div>
-            <span className="text-[10px] text-[#9CA3AF] font-bold">KURTOSIS</span>
-            <div className="text-lg font-mono font-bold text-amber-600">{telemetry.kurt.toFixed(1)}</div>
-          </div>
-        </div>
-
-        {/* Action Button */}
-        {!report && (
-          <button
-            onClick={handleGenerateReport}
-            disabled={loading}
-            className="w-full py-3.5 rounded-2xl bg-[#1C1F26] hover:bg-black text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
-          >
-            {loading ? (
-              <span className="animate-pulse">Analyzing Micro-Vibrations...</span>
-            ) : (
-              <>
-                <span>Generate Prescriptive Diagnostic Report</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
         )}
 
-        {/* Report Output */}
+        {/* Loading Spinner */}
+        {loading && (
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+            <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
+            <span className="text-xs font-bold text-[#12141A]">
+              Synthesizing acoustic spectral signatures & physical harmonics...
+            </span>
+          </div>
+        )}
+
+        {/* Report Display */}
         {report && (
           <div className="flex flex-col gap-4 animate-fade-in">
-            {/* Fault Banner */}
-            <div
-              className={`p-4 rounded-2xl border flex items-start gap-3 ${
-                report.healthScore < 50
-                  ? "bg-rose-50 border-rose-200 text-rose-900"
-                  : "bg-emerald-50 border-emerald-200 text-emerald-900"
-              }`}
-            >
-              {report.healthScore < 50 ? (
-                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              ) : (
-                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-              )}
-              <div className="flex flex-col">
-                <span className="font-bold text-sm">{report.faultType}</span>
-                <span className="text-xs opacity-90 mt-0.5">{report.rootCause}</span>
+            {/* Fault Title Card */}
+            <div className="p-4 rounded-2xl bg-[#1C1F26] text-white flex flex-col gap-2 shadow-sm">
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-amber-400 uppercase tracking-wider">
+                  Diagnosis Result
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-white/10 text-white font-mono text-[10px]">
+                  {report.isoClass}
+                </span>
+              </div>
+              <h3 className="text-lg font-black tracking-tight">{report.faultType}</h3>
+              <div className="text-xs font-bold text-neutral-300">
+                Urgency: <span className="text-rose-400">{report.urgency}</span> · RUL: {report.estimatedRUL}
               </div>
             </div>
 
-            {/* Lifetime RUL */}
-            <div className="flex justify-between items-center p-3.5 rounded-xl bg-neutral-100 text-xs font-semibold">
-              <span className="text-[#6B7280]">Estimated Remaining Life (RUL):</span>
-              <span className="font-bold text-[#12141A]">{report.estimatedRUL}</span>
+            {/* Root Cause */}
+            <div className="p-4 rounded-2xl bg-neutral-50 border border-neutral-100 flex flex-col gap-1">
+              <h4 className="text-xs font-bold text-[#12141A] uppercase tracking-wider">Root Cause Analysis</h4>
+              <p className="text-xs text-[#4B5563] leading-relaxed">{report.rootCause}</p>
             </div>
 
-            {/* Recommended Actions */}
-            <div>
-              <h4 className="text-xs font-bold text-[#12141A] uppercase tracking-wider mb-2">
-                Prescriptive Maintenance Checklist
-              </h4>
+            {/* Recommended Action Checklist */}
+            <div className="flex flex-col gap-2">
+              <h4 className="text-xs font-bold text-[#12141A] uppercase tracking-wider">Prescribed Action Steps</h4>
               <div className="flex flex-col gap-2">
                 {report.recommendedActions.map((action: string, idx: number) => (
-                  <div
-                    key={idx}
-                    className="flex items-start gap-2.5 p-2.5 rounded-xl bg-[#F9FAFB] border border-black/5 text-xs text-[#12141A]"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>{action}</span>
+                  <div key={idx} className="flex items-start gap-2.5 p-3 rounded-xl bg-neutral-50 border border-neutral-100 text-xs">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span className="text-[#374151] font-medium">{action}</span>
                   </div>
                 ))}
               </div>
@@ -147,10 +140,9 @@ export const AIDiagnosticModal: React.FC<AIDiagnosticModalProps> = ({
 
             <button
               onClick={handleGenerateReport}
-              disabled={loading}
-              className="mt-2 py-2.5 rounded-xl bg-neutral-200 hover:bg-neutral-300 text-xs font-bold text-[#12141A] transition-all cursor-pointer"
+              className="mt-2 py-2.5 rounded-full border border-neutral-200 hover:bg-neutral-100 text-[#12141A] font-bold text-xs transition-all cursor-pointer"
             >
-              Re-evaluate Live Telemetry
+              Re-Analyze Live Stream
             </button>
           </div>
         )}

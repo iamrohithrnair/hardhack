@@ -1,16 +1,23 @@
 "use client";
 
 import React from "react";
-import { Clock, Activity, Zap } from "lucide-react";
+import { Clock, Activity, Zap, Sparkles, Settings2 } from "lucide-react";
 import { TelemetryData } from "../hooks/useDeviceStream";
 import { MachineProfile } from "../types/machine";
 
 interface HeroSectionProps {
   telemetry: TelemetryData;
   machine: MachineProfile;
+  onOpenCustomizer?: () => void;
+  onOpenProfiler?: () => void;
 }
 
-export const HeroSection: React.FC<HeroSectionProps> = ({ telemetry, machine }) => {
+export const HeroSection: React.FC<HeroSectionProps> = ({
+  telemetry,
+  machine,
+  onOpenCustomizer,
+  onOpenProfiler
+}) => {
   const isHealthy = telemetry.score >= 70;
   const isCritical = telemetry.score < 30;
 
@@ -22,80 +29,76 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ telemetry, machine }) 
     <section className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 mt-1">
       {/* Left Greeting & Segmented Health Pill */}
       <div className="flex flex-col gap-4 flex-1">
-        <h1 className="text-3xl font-extrabold tracking-tight text-[#12141A]">
-          Diagnostic Center,{" "}
-          <span className="text-[#6B7280] font-semibold">{machine.name}</span>
-        </h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#12141A]">
+            Diagnostic Center,{" "}
+            <span className="text-[#6B7280] font-semibold">{machine.name}</span>
+          </h1>
+
+          {onOpenCustomizer && (
+            <button
+              onClick={onOpenCustomizer}
+              className="px-3 py-1 rounded-full bg-white/80 hover:bg-neutral-100 border border-black/5 text-xs font-bold text-[#12141A] transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              Switch Target
+            </button>
+          )}
+
+          {onOpenProfiler && (
+            <button
+              onClick={onOpenProfiler}
+              className="px-3 py-1 rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              + AI Profile Custom Event
+            </button>
+          )}
+        </div>
 
         <div className="flex flex-wrap items-center gap-2 bg-black/[0.04] p-1.5 rounded-full max-w-2xl border border-black/5">
-          {/* Health Segment */}
+          {/* Active Status Badge */}
           <div
-            className={`flex items-center justify-between px-3.5 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
+            className={`px-4 py-1.5 rounded-full text-xs font-bold text-white flex items-center gap-2 shadow-xs ${
               isCritical
-                ? "bg-rose-600 text-white"
-                : isHealthy
-                ? "bg-[#1C1F26] text-white"
-                : "bg-amber-500 text-white"
+                ? "bg-rose-500"
+                : !isHealthy
+                ? "bg-amber-500"
+                : "bg-[#1C1F26]"
             }`}
-            style={{ minWidth: "120px" }}
           >
-            <span>Health</span>
-            <span className="font-bold">{telemetry.score}%</span>
+            <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+            {isCritical
+              ? "Critical Imbalance"
+              : !isHealthy
+              ? "Warning Anomaly"
+              : "Nominal Harmonic"}
           </div>
 
-          {/* Balance Segment */}
-          <div
-            className="flex items-center justify-between px-3.5 py-1.5 rounded-full text-[11px] font-semibold bg-[#F5C544] text-[#12141A]"
-            style={{ minWidth: "110px" }}
-          >
-            <span>Balance</span>
-            <span className="font-bold">
-              {telemetry.state === 3 ? "18%" : "96%"}
-            </span>
+          {/* Health Score Pill */}
+          <div className="px-4 py-1.5 rounded-full bg-white border border-black/5 text-xs font-extrabold text-[#12141A] shadow-xs flex items-center gap-1.5">
+            <span className="text-[#F5C544]">●</span>
+            Score: {telemetry.score}%
           </div>
 
-          {/* ISO 10816 Segment */}
-          <div
-            className="flex items-center justify-between px-3.5 py-1.5 rounded-full text-[11px] font-semibold bg-white text-[#6B7280] border border-black/5 shadow-xs"
-            style={{ minWidth: "120px" }}
-          >
-            <span>{machine.isoClass}</span>
-            <span
-              className={`font-bold ${
-                telemetry.iso < 1.12
-                  ? "text-emerald-600"
-                  : telemetry.iso < 2.8
-                  ? "text-amber-600"
-                  : "text-rose-600"
-              }`}
-            >
-              {telemetry.iso < 1.12 ? "Class A" : telemetry.iso < 2.8 ? "Class B" : "Class D"}
-            </span>
+          {/* ISO Standard Pill */}
+          <div className="px-4 py-1.5 rounded-full bg-white/80 text-xs font-bold text-[#6B7280]">
+            {machine.isoClass}
           </div>
 
-          {/* Kurtosis Segment */}
-          <div
-            className="flex items-center justify-between px-3.5 py-1.5 rounded-full text-[11px] font-semibold bg-white/60 text-[#9CA3AF]"
-            style={{ minWidth: "100px" }}
-          >
-            <span>Kurtosis</span>
-            <span
-              className={`font-bold ${
-                telemetry.kurt > 4.0 ? "text-amber-600" : "text-[#12141A]"
-              }`}
-            >
-              {telemetry.kurt.toFixed(1)}
-            </span>
+          {/* Target Type Pill */}
+          <div className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-700 font-mono text-[11px] font-bold">
+            {machine.detectionTarget?.toUpperCase() || "VIBRATION"}
           </div>
         </div>
       </div>
 
-      {/* Right Rolling Stat Numbers */}
-      <div className="flex items-center gap-6 sm:gap-8">
-        {/* RPM */}
+      {/* Right Real-time Dynamic Metric Pill Counters */}
+      <div className="flex items-center gap-6 sm:gap-8 bg-white/60 backdrop-blur-md p-4 rounded-[28px] border border-black/5 shadow-[0_8px_24px_rgba(0,0,0,0.02)]">
+        {/* Nominal RPM */}
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-full bg-white/80 border border-black/5 flex items-center justify-center text-[#12141A] shadow-xs">
-            <Clock className="w-4 h-4" />
+            <Clock className="w-4 h-4 text-emerald-500" />
           </div>
           <div className="flex flex-col">
             <span className="text-2xl font-extrabold tracking-tight font-mono text-[#12141A]">
