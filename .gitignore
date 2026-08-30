@@ -12,6 +12,13 @@ sdkconfig.old
 .pio/
 **/ .pio/
 
+# Virtual Environments & Python cache
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
 # OS files
 .DS_Store
 *.DS_Store

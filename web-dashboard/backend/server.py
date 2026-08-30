@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MECHA-WHISPERER | High-Performance Python Backend Bridge
+MECHA-WHISPERER | High-Performance Python 3.14 Backend Bridge
 Connects to ESP32-S3 via USB Serial (/dev/cu.usbmodem*)
 and broadcasts real-time 50Hz-250Hz telemetry over WebSockets to Next.js dashboard.
 """
@@ -13,6 +13,7 @@ import math
 import os
 import sys
 import time
+from contextlib import asynccontextmanager
 from typing import List, Set
 
 import serial
@@ -23,16 +24,6 @@ from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("mecha_backend")
-
-app = FastAPI(title="Mecha-Whisperer Hardware Bridge", version="2.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Global State
 class DeviceState:
@@ -66,6 +57,128 @@ def find_serial_ports() -> List[str]:
 class ControlPayload(BaseModel):
     command: str
     param: str = ""
+
+def serial_reader_thread():
+    """Background loop that reads from physical USB serial port."""
+    while True:
+        try:
+            ports = find_serial_ports()
+            target_port = ports[0] if ports else state.port_name
+            
+            if not state.serial_inst or not state.serial_inst.is_open:
+                try:
+                    logger.info(f"Attempting connection to {target_port} @ {state.baud_rate}...")
+                    state.serial_inst = serial.Serial(target_port, state.baud_rate, timeout=1)
+                    state.port_name = target_port
+                    state.connected = True
+                    logger.info(f"Connected to ESP32-S3 on {target_port}")
+                except Exception as e:
+                    state.connected = False
+                    time.sleep(2)
+                    continue
+
+            line = state.serial_inst.readline().decode("utf-8", errors="ignore").strip()
+            if line.startswith("{") and line.endswith("}"):
+                try:
+                    data = json.loads(line)
+                    state.last_telemetry = {
+                        "rpm": data.get("rpm", 2910),
+                        "f0": data.get("f0", 48.5),
+                        "rms": data.get("rms", 0.082),
+                        "kurt": data.get("kurt", 2.94),
+                        "iso": data.get("iso", 0.16),
+                        "score": data.get("score", 100),
+                        "state": data.get("state", 1),
+                        "source": "hardware"
+                    }
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Serial connection error: {e}")
+            state.connected = False
+            if state.serial_inst:
+                try:
+                    state.serial_inst.close()
+                except Exception:
+                    pass
+            time.sleep(1)
+
+async def broadcast_telemetry(telemetry: dict):
+    if not state.subscribers:
+        return
+    msg = json.dumps({"type": "telemetry", "data": telemetry})
+    dead_sockets = []
+    for ws in list(state.subscribers):
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead_sockets.append(ws)
+    for ws in dead_sockets:
+        state.subscribers.discard(ws)
+
+async def telemetry_broadcast_loop():
+    """Asynchronous loop that broadcasts telemetry at 30 Hz to web clients."""
+    while True:
+        if state.demo_mode or not state.connected:
+            state.demo_phase += 0.15
+            if state.demo_state == 1:
+                f0 = 48.5 + 0.1 * math.sin(state.demo_phase * 0.05)
+                state.last_telemetry = {
+                    "rpm": round(f0 * 60),
+                    "f0": round(f0, 1),
+                    "rms": round(0.082 + 0.003 * math.sin(state.demo_phase * 0.2), 3),
+                    "kurt": round(2.94 + 0.05 * math.sin(state.demo_phase * 0.1), 2),
+                    "iso": 0.16,
+                    "score": 98,
+                    "state": 1,
+                    "source": "simulated"
+                }
+            elif state.demo_state == 3:
+                f0 = 48.2 + 0.3 * math.sin(state.demo_phase * 0.1)
+                state.last_telemetry = {
+                    "rpm": round(f0 * 60),
+                    "f0": round(f0, 1),
+                    "rms": round(1.48 + 0.06 * math.sin(state.demo_phase * 0.3), 3),
+                    "kurt": round(3.6 + 0.15 * math.sin(state.demo_phase * 0.2), 2),
+                    "iso": 6.42,
+                    "score": 18,
+                    "state": 3,
+                    "source": "simulated"
+                }
+            else:
+                state.last_telemetry = {
+                    "rpm": 2910,
+                    "f0": 48.5,
+                    "rms": 0.48,
+                    "kurt": 8.6,
+                    "iso": 2.95,
+                    "score": 32,
+                    "state": 4,
+                    "source": "simulated"
+                }
+                
+        await broadcast_telemetry(state.last_telemetry)
+        await asyncio.sleep(0.033)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    import threading
+    t = threading.Thread(target=serial_reader_thread, daemon=True)
+    t.start()
+    task = asyncio.create_task(telemetry_broadcast_loop())
+    logger.info("Mecha-Whisperer Python 3.14 Backend started on http://localhost:8765")
+    yield
+    task.cancel()
+
+app = FastAPI(title="Mecha-Whisperer Hardware Bridge", version="2.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/api/status")
 async def get_status():
@@ -115,14 +228,12 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info(f"WebSocket client connected. Total clients: {len(state.subscribers)}")
     
     try:
-        # Send initial status
         await websocket.send_text(json.dumps({
             "type": "telemetry",
             "data": state.last_telemetry
         }))
         
         while True:
-            # Keep alive and listen for client messages
             msg = await websocket.receive_text()
             try:
                 data = json.loads(msg)
@@ -132,122 +243,8 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception:
                 pass
     except WebSocketDisconnect:
-        state.subscribers.remove(websocket)
+        state.subscribers.discard(websocket)
         logger.info(f"WebSocket client disconnected. Remaining: {len(state.subscribers)}")
-
-async def broadcast_telemetry(telemetry: dict):
-    if not state.subscribers:
-        return
-    msg = json.dumps({"type": "telemetry", "data": telemetry})
-    dead_sockets = []
-    for ws in state.subscribers:
-        try:
-            await ws.send_text(msg)
-        except Exception:
-            dead_sockets.append(ws)
-    for ws in dead_sockets:
-        state.subscribers.remove(ws)
-
-def serial_reader_thread():
-    """Background loop that reads from physical USB serial port."""
-    while True:
-        try:
-            ports = find_serial_ports()
-            target_port = ports[0] if ports else state.port_name
-            
-            if not state.serial_inst or not state.serial_inst.is_open:
-                try:
-                    logger.info(f"Attempting connection to {target_port} @ {state.baud_rate}...")
-                    state.serial_inst = serial.Serial(target_port, state.baud_rate, timeout=1)
-                    state.port_name = target_port
-                    state.connected = True
-                    logger.info(f"Connected to ESP32-S3 on {target_port}")
-                except Exception as e:
-                    state.connected = False
-                    time.sleep(2)
-                    continue
-
-            line = state.serial_inst.readline().decode("utf-8", errors="ignore").strip()
-            if line.startswith("{") and line.endswith("}"):
-                try:
-                    data = json.loads(line)
-                    state.last_telemetry = {
-                        "rpm": data.get("rpm", 2910),
-                        "f0": data.get("f0", 48.5),
-                        "rms": data.get("rms", 0.082),
-                        "kurt": data.get("kurt", 2.94),
-                        "iso": data.get("iso", 0.16),
-                        "score": data.get("score", 100),
-                        "state": data.get("state", 1),
-                        "source": "hardware"
-                    }
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.warn(f"Serial connection error: {e}")
-            state.connected = False
-            if state.serial_inst:
-                try:
-                    state.serial_inst.close()
-                except Exception:
-                    pass
-            time.sleep(1)
-
-async def telemetry_broadcast_loop():
-    """Asynchronous loop that broadcasts telemetry at 30-50 Hz to web clients."""
-    while True:
-        if state.demo_mode or not state.connected:
-            # Generate physics telemetry in demo/fallback mode
-            state.demo_phase += 0.15
-            if state.demo_state == 1:
-                # Nominal
-                f0 = 48.5 + 0.1 * math.sin(state.demo_phase * 0.05)
-                state.last_telemetry = {
-                    "rpm": round(f0 * 60),
-                    "f0": round(f0, 1),
-                    "rms": round(0.082 + 0.003 * math.sin(state.demo_phase * 0.2), 3),
-                    "kurt": round(2.94 + 0.05 * math.sin(state.demo_phase * 0.1), 2),
-                    "iso": 0.16,
-                    "score": 98,
-                    "state": 1,
-                    "source": "simulated"
-                }
-            elif state.demo_state == 3:
-                # Rotor Imbalance
-                f0 = 48.2 + 0.3 * math.sin(state.demo_phase * 0.1)
-                state.last_telemetry = {
-                    "rpm": round(f0 * 60),
-                    "f0": round(f0, 1),
-                    "rms": round(1.48 + 0.06 * math.sin(state.demo_phase * 0.3), 3),
-                    "kurt": round(3.6 + 0.15 * math.sin(state.demo_phase * 0.2), 2),
-                    "iso": 6.42,
-                    "score": 18,
-                    "state": 3,
-                    "source": "simulated"
-                }
-            else:
-                # Bearing damage
-                state.last_telemetry = {
-                    "rpm": 2910,
-                    "f0": 48.5,
-                    "rms": 0.48,
-                    "kurt": 8.6,
-                    "iso": 2.95,
-                    "score": 32,
-                    "state": 4,
-                    "source": "simulated"
-                }
-                
-        await broadcast_telemetry(state.last_telemetry)
-        await asyncio.sleep(0.033) # ~30 Hz broadcast
-
-@app.on_event("startup")
-async def startup_event():
-    import threading
-    t = threading.Thread(target=serial_reader_thread, daemon=True)
-    t.start()
-    asyncio.create_task(telemetry_broadcast_loop())
-    logger.info("Mecha-Whisperer Backend started on http://localhost:8765")
 
 if __name__ == "__main__":
     uvicorn.run("server:app", host="0.0.0.0", port=8765, log_level="info")
