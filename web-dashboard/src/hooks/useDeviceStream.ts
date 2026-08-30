@@ -32,6 +32,7 @@ export function useDeviceStream() {
   const [isExamRunning, setIsExamRunning] = useState<boolean>(true);
   const [examSeconds, setExamSeconds] = useState<number>(45);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [wifiTargetIP, setWifiTargetIP] = useState<string>("192.168.4.1");
 
   const wsRef = useRef<WebSocket | null>(null);
   const bleDeviceRef = useRef<any>(null);
@@ -41,6 +42,7 @@ export function useDeviceStream() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const motorOscRef = useRef<OscillatorNode | null>(null);
   const motorGainRef = useRef<GainNode | null>(null);
+  const reconnectTimerRef = useRef<any>(null);
 
   // Audio Stethoscope Engine
   const initAudio = useCallback(() => {
@@ -83,38 +85,7 @@ export function useDeviceStream() {
     motorGainRef.current.gain.setTargetAtTime(vol, audioCtxRef.current.currentTime, 0.05);
   }, [soundEnabled]);
 
-  // 1. Connect via Python WebSocket Backend (ws://localhost:8765/ws)
-  const connectWebSocket = useCallback(() => {
-    try {
-      const ws = new WebSocket("ws://localhost:8765/ws");
-
-      ws.onopen = () => {
-        setIsConnected(true);
-        setConnectionMode("backend_ws");
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload.type === "telemetry" && payload.data) {
-            setTelemetry((prev) => {
-              const updated = { ...prev, ...payload.data };
-              updateAudioPitch(updated.f0, updated.state);
-              return updated;
-            });
-          }
-        } catch (e) {}
-      };
-
-      ws.onclose = () => {
-        setIsConnected(false);
-      };
-
-      wsRef.current = ws;
-    } catch (err) {}
-  }, [updateAudioPitch]);
-
-  // 2. Connect via Wi-Fi SoftAP / Network WebSocket (ws://192.168.4.1/ws)
+  // 1. Connect via Wi-Fi SoftAP / Network WebSocket (ws://192.168.4.1/ws)
   const connectWiFi = useCallback((ip: string = "192.168.4.1") => {
     initAudio();
     if (wsRef.current) {
@@ -122,6 +93,7 @@ export function useDeviceStream() {
     }
 
     try {
+      setWifiTargetIP(ip);
       const wsUrl = `ws://${ip}/ws`;
       const ws = new WebSocket(wsUrl);
 
@@ -147,9 +119,44 @@ export function useDeviceStream() {
 
       wsRef.current = ws;
     } catch (err) {
-      alert(`Could not connect to Wi-Fi stream at ws://${ip}/ws. Please ensure you are connected to the 'MECHA-WHISPERER' Wi-Fi network.`);
+      console.warn("Wi-Fi WebSocket error:", err);
     }
   }, [initAudio, updateAudioPitch]);
+
+  // 2. Connect via Python WebSocket Backend (ws://localhost:8765/ws)
+  const connectWebSocket = useCallback(() => {
+    try {
+      const ws = new WebSocket("ws://localhost:8765/ws");
+
+      ws.onopen = () => {
+        setIsConnected(true);
+        setConnectionMode("backend_ws");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "telemetry" && payload.data) {
+            setTelemetry((prev) => {
+              const updated = { ...prev, ...payload.data };
+              updateAudioPitch(updated.f0, updated.state);
+              return updated;
+            });
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+        // If Python USB bridge closes, attempt auto-connecting to Wi-Fi SoftAP
+        connectWiFi(wifiTargetIP);
+      };
+
+      wsRef.current = ws;
+    } catch (err) {
+      connectWiFi(wifiTargetIP);
+    }
+  }, [connectWiFi, updateAudioPitch, wifiTargetIP]);
 
   // 3. Connect via Web Bluetooth API (BLE 5.0 Wireless)
   const connectBluetooth = useCallback(async () => {
@@ -190,7 +197,7 @@ export function useDeviceStream() {
           } catch (e) {}
         });
       } catch (svcErr) {
-        console.warn("BLE Characteristic subscription info:", svcErr);
+        console.warn("BLE Characteristic subscription:", svcErr);
       }
     } catch (err) {
       console.warn("Bluetooth pairing error or cancelled:", err);
@@ -242,7 +249,7 @@ export function useDeviceStream() {
         }
       }
     } catch (err) {
-      console.warn("Serial connection closed or cancelled:", err);
+      console.warn("Serial connection closed:", err);
       setIsConnected(false);
     }
   }, [initAudio, updateAudioPitch]);
@@ -316,13 +323,31 @@ export function useDeviceStream() {
     } catch (e) {}
   }, [initAudio, telemetry.f0, updateAudioPitch]);
 
-  // Try auto-connecting to Python WebSocket backend on mount
+  // Try auto-connecting to Python WebSocket backend or Wi-Fi SoftAP on mount
   useEffect(() => {
     connectWebSocket();
     return () => {
       if (wsRef.current) wsRef.current.close();
+      if (reconnectTimerRef.current) clearInterval(reconnectTimerRef.current);
     };
   }, [connectWebSocket]);
+
+  // Periodic HTTP Polling fallback when in Wi-Fi mode
+  useEffect(() => {
+    if (connectionMode === "wifi_ws" && !isConnected) {
+      const pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`http://${wifiTargetIP}/api/telemetry`, { signal: AbortSignal.timeout(1500) });
+          if (res.ok) {
+            const data = await res.json();
+            setTelemetry((prev) => ({ ...prev, ...data, source: "hardware" }));
+            setIsConnected(true);
+          }
+        } catch (e) {}
+      }, 250);
+      return () => clearInterval(pollTimer);
+    }
+  }, [connectionMode, isConnected, wifiTargetIP]);
 
   // Exam Timer
   useEffect(() => {
@@ -340,6 +365,7 @@ export function useDeviceStream() {
     isExamRunning,
     examSeconds,
     soundEnabled,
+    wifiTargetIP,
     setIsExamRunning,
     setSoundEnabled,
     connectWebSerial,

@@ -65,6 +65,32 @@ export default function DashboardPage() {
         {/* Hero Section */}
         <HeroSection telemetry={telemetry} machine={currentMachine} />
 
+        {/* Wireless Quick-Connect Floating Banner if Disconnected from USB */}
+        {!isConnected && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 backdrop-blur-md animate-fade-in">
+            <div className="flex items-center gap-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
+              <p className="text-xs font-semibold text-[#12141A]">
+                <strong>Wireless Mode Ready:</strong> Connect laptop Wi-Fi to <span className="font-mono bg-white/80 px-2 py-0.5 rounded-md border border-amber-300 font-bold">MECHA-WHISPERER</span> or pair via Bluetooth.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => connectWiFi("192.168.4.1")}
+                className="px-3.5 py-1.5 rounded-full bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+              >
+                Connect Wi-Fi Stream
+              </button>
+              <button
+                onClick={connectBluetooth}
+                className="px-3.5 py-1.5 rounded-full bg-[#1C1F26] hover:bg-black text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+              >
+                Pair Bluetooth
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* TAB 1: MAIN DASHBOARD OVERVIEW */}
         {activeTab === "dashboard" && (
           <div className="flex flex-col gap-6 animate-fade-in">
