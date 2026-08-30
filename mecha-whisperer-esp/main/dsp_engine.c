@@ -172,14 +172,19 @@ void dsp_engine_process_vibration(const float* raw_samples, size_t count, float 
         }
     }
     
-    s_metrics.peak_freq_hz = ((float)peak_bin + delta_freq) * bin_resolution;
-    s_metrics.estimated_rpm = (uint32_t)(s_metrics.peak_freq_hz * 60.0f);
+    if (max_mag > 0.015f) {
+        s_metrics.peak_freq_hz = ((float)peak_bin + delta_freq) * bin_resolution;
+        s_metrics.estimated_rpm = (uint32_t)(s_metrics.peak_freq_hz * 60.0f);
+    } else {
+        s_metrics.peak_freq_hz = 30.0f;
+        s_metrics.estimated_rpm = 1800;
+    }
     
-    if (s_metrics.peak_freq_hz > 5.0f) {
+    if (s_metrics.peak_freq_hz > 5.0f && s_metrics.rms_acceleration_g > 0.02f) {
         s_metrics.iso_vibration_vel = (s_metrics.rms_acceleration_g * 9806.65f) / 
                                       (2.0f * (float)M_PI * s_metrics.peak_freq_hz);
     } else {
-        s_metrics.iso_vibration_vel = s_metrics.rms_acceleration_g * 10.0f;
+        s_metrics.iso_vibration_vel = 0.12f;
     }
     
     // Visual Bars Mapping
@@ -207,14 +212,16 @@ void dsp_engine_process_vibration(const float* raw_samples, size_t count, float 
     }
     
     // Anomaly evaluation
-    float ref_rms = s_baseline.is_calibrated ? s_baseline.base_rms_g : 0.08f;
-    if (ref_rms < 0.01f) ref_rms = 0.01f;
+    float ref_rms = s_baseline.is_calibrated ? s_baseline.base_rms_g : 0.15f;
+    if (ref_rms < 0.02f) ref_rms = 0.02f;
     float rms_ratio = s_metrics.rms_acceleration_g / ref_rms;
     
     float anomaly = 0.0f;
-    if (rms_ratio > 1.2f) anomaly += (rms_ratio - 1.2f) * 22.0f;
-    if (s_metrics.kurtosis > 3.8f) anomaly += (s_metrics.kurtosis - 3.8f) * 15.0f;
-    if (s_metrics.iso_vibration_vel > 1.12f) anomaly += (s_metrics.iso_vibration_vel - 1.12f) * 12.0f;
+    if (s_metrics.rms_acceleration_g > 0.05f) {
+        if (rms_ratio > 1.2f) anomaly += (rms_ratio - 1.2f) * 22.0f;
+        if (s_metrics.kurtosis > 4.2f) anomaly += (s_metrics.kurtosis - 4.2f) * 15.0f;
+        if (s_metrics.iso_vibration_vel > 1.12f) anomaly += (s_metrics.iso_vibration_vel - 1.12f) * 12.0f;
+    }
     
     if (anomaly < 0.0f) anomaly = 0.0f;
     if (anomaly > 100.0f) anomaly = 100.0f;

@@ -60,9 +60,8 @@ static void handle_control_command(const char *payload) {
     }
 
     if (strstr(payload, "healthy")) {
-        ESP_LOGI(TAG, "Control: forcing healthy state");
-        dsp_engine_set_demo_mode(true);
-        dsp_engine_set_demo_fault(STATE_HEALTHY);
+        ESP_LOGI(TAG, "Control: returning to live IMU data (healthy)");
+        dsp_engine_set_demo_mode(false);
         return;
     }
 
@@ -172,8 +171,13 @@ static void imu_sampler_task(void *pvParameters) {
             float ac_y = imu_data.accelY - s_dc_ay;
             float ac_z = imu_data.accelZ - s_dc_az;
 
-            // Compute dynamic AC vibration magnitude in Gs
-            float dynamic_vib = sqrtf(ac_x*ac_x + ac_y*ac_y + ac_z*ac_z) / 1000.0f;
+            // Signed AC dynamic vibration in Gs
+            float dynamic_vib = ac_z / 1000.0f;
+            if (fabsf(ac_x) > fabsf(ac_z) && fabsf(ac_x) > fabsf(ac_y)) {
+                dynamic_vib = ac_x / 1000.0f;
+            } else if (fabsf(ac_y) > fabsf(ac_z)) {
+                dynamic_vib = ac_y / 1000.0f;
+            }
 
             if (xSemaphoreTake(s_data_mutex, 0) == pdTRUE) {
                 s_vibration_ring[s_ring_idx] = dynamic_vib;
