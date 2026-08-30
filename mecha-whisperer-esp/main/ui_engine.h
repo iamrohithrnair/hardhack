@@ -7,7 +7,12 @@ typedef enum {
     VIEW_FFT_SPECTRUM,             // View 2: 24-Band FFT Spectral Equalizer & Harmonics
     VIEW_KURTOSIS_IMPACT,          // View 3: Kurtosis & Impulse Shock History
     VIEW_TRIPLE_ACTIVITY_RINGS,    // View 4: Concentric Activity Rings & Health Score
-    VIEW_BOLD_DIAGNOSTICS,         // View 5: Bold Diagnosis & ISO 10816 Evaluation
+    VIEW_PROGRESS_ARC,             // View 5: High-Precision Progress Arc & Severity
+    VIEW_ROTATION_TACHOMETER,      // View 6: Rotational Tachometer Speedometer Gauge
+    VIEW_FLUID_ENERGY_TANK,        // View 7: Fluid Energy Density Wave Level
+    VIEW_HARMONIC_GOAL_PILLARS,    // View 8: Harmonic Energy Goal Pillars (1X-7X)
+    VIEW_DOT_MATRIX_HEATMAP,       // View 9: Spatio-Temporal Dot Matrix Heatmap
+    VIEW_BOLD_DIAGNOSTICS,         // View 10: Bold Diagnosis & ISO 10816 Evaluation
     VIEW_MAX_COUNT
 } ui_view_mode_t;
 
