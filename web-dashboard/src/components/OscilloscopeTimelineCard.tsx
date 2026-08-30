@@ -30,7 +30,6 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
   // Custom asset parameters
   const targetHz = machine.fundamentalHz || 48.5;
   const warnRms = machine.warningRms || 0.25;
-  const critRms = machine.criticalRms || 0.85;
   const kurtThresh = machine.kurtosisThreshold || 4.0;
 
   useEffect(() => {
@@ -58,33 +57,39 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       ctx.lineTo(w, midY);
       ctx.stroke();
 
-      // Smooth EMA low-pass for telemetry.rms to prevent visual jitter
-      smoothedRmsRef.current = smoothedRmsRef.current * 0.90 + (telemetry.rms || 0.082) * 0.10;
+      // Fast-reacting low-pass filter so physical shakes produce instant visual response
+      const liveRms = telemetry.rms || 0.082;
+      smoothedRmsRef.current = smoothedRmsRef.current * 0.72 + liveRms * 0.28;
 
-      // Dynamic Angular Phase Speed driven by fundamental frequency
+      // Dynamic Angular Phase Speed driven by fundamental frequency + motion kinetic speed
       const displayHz = telemetry.f0 > 1.0 ? telemetry.f0 : targetHz;
-      const freqMultiplier = Math.max(0.08, Math.min(0.20, displayHz / 300.0));
-      phaseRef.current += freqMultiplier;
+      const baseSpeed = Math.max(0.08, Math.min(0.24, displayHz / 260.0));
+      const shakeSpeedBoost = Math.max(0, (smoothedRmsRef.current - 0.12) * 0.15);
+      phaseRef.current += baseSpeed + shakeSpeedBoost;
 
-      // Smooth dynamic amplitude
-      const normRms = smoothedRmsRef.current / Math.max(0.05, warnRms);
-      const rmsAmp = Math.max(0.18, Math.min(1.1, normRms * 0.45));
+      // Dynamic Kinetic Amplitude scaling with live sensor vibrations
+      const kineticScale = (smoothedRmsRef.current / Math.max(0.05, warnRms * 0.5));
+      const rmsAmp = Math.max(0.22, Math.min(2.1, 0.32 * kineticScale));
 
-      let sampleX = rmsAmp * Math.sin(phaseRef.current);
-      let sampleY = rmsAmp * 0.72 * Math.sin(phaseRef.current + 1.2);
-      let sampleZ = rmsAmp * 0.82 * Math.sin(phaseRef.current + 2.4);
+      // Shake ripple perturbation when sensor moves
+      const isShaking = smoothedRmsRef.current > 0.15;
+      const shakeJitter = isShaking ? (smoothedRmsRef.current - 0.10) * 0.55 * Math.sin(phaseRef.current * 3.4) : 0;
+
+      let sampleX = (rmsAmp * Math.sin(phaseRef.current)) + shakeJitter;
+      let sampleY = (rmsAmp * 0.75 * Math.sin(phaseRef.current + 1.2)) + shakeJitter * 0.8;
+      let sampleZ = (rmsAmp * 0.85 * Math.sin(phaseRef.current + 2.4)) + shakeJitter * 0.9;
 
       if (telemetry.state === 3) {
         // Rotor unbalance: harmonic 1X swell
-        const mod = 1.0 + 0.25 * Math.sin(phaseRef.current * 0.2);
-        sampleX = rmsAmp * 1.5 * Math.sin(phaseRef.current) * mod;
-        sampleY = rmsAmp * 1.1 * Math.sin(phaseRef.current + 1.4);
-        sampleZ = rmsAmp * 1.25 * Math.sin(phaseRef.current + 2.8);
+        const mod = 1.0 + 0.35 * Math.sin(phaseRef.current * 0.25);
+        sampleX = rmsAmp * 1.55 * Math.sin(phaseRef.current) * mod;
+        sampleY = rmsAmp * 1.15 * Math.sin(phaseRef.current + 1.4);
+        sampleZ = rmsAmp * 1.30 * Math.sin(phaseRef.current + 2.8);
       } else if (telemetry.state === 4) {
         // Bearing spalling / impulsive shock
-        sampleX = rmsAmp * (Math.sin(phaseRef.current) + 0.3 * Math.sin(phaseRef.current * 4));
-        sampleY = rmsAmp * (0.75 * Math.sin(phaseRef.current + 1.2) + 0.2 * Math.sin(phaseRef.current * 4));
-        sampleZ = rmsAmp * (0.85 * Math.sin(phaseRef.current + 2.4) + 0.25 * Math.sin(phaseRef.current * 4));
+        sampleX = rmsAmp * (Math.sin(phaseRef.current) + 0.4 * Math.sin(phaseRef.current * 4));
+        sampleY = rmsAmp * (0.75 * Math.sin(phaseRef.current + 1.2) + 0.3 * Math.sin(phaseRef.current * 4));
+        sampleZ = rmsAmp * (0.85 * Math.sin(phaseRef.current + 2.4) + 0.35 * Math.sin(phaseRef.current * 4));
       }
 
       waveHistoryRef.current.shift();
@@ -97,37 +102,40 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
       waveHistoryZRef.current.push(sampleZ);
 
       // -------------------------------------------------------------
-      // 1. 24-Band FFT Bars in Background
+      // 1. 28-Band FFT Bars in Background
       // -------------------------------------------------------------
       const BARS = 28;
       const barWidth = (w - (BARS - 1) * 6) / BARS;
 
       for (let i = 0; i < BARS; i++) {
-        let target = (telemetry.visualSpectrum[i % telemetry.visualSpectrum.length] || 0.05);
-        if (telemetry.state === 3 && i === 4) target = 0.92;
+        let specVal = (telemetry.visualSpectrum && telemetry.visualSpectrum[i % telemetry.visualSpectrum.length]) || 0.05;
+        if (isShaking) {
+          specVal = Math.min(1.0, specVal * (1.0 + (smoothedRmsRef.current - 0.1) * 2.0));
+        }
+        if (telemetry.state === 3 && i === 4) specVal = 0.94;
 
-        fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.88 + target * 0.12;
+        fftHistoryRef.current[i] = fftHistoryRef.current[i] * 0.82 + specVal * 0.18;
         if (fftHistoryRef.current[i] > fftPeaksRef.current[i]) {
           fftPeaksRef.current[i] = fftHistoryRef.current[i];
         } else {
-          fftPeaksRef.current[i] = Math.max(0, fftPeaksRef.current[i] - 0.008);
+          fftPeaksRef.current[i] = Math.max(0, fftPeaksRef.current[i] - 0.010);
         }
 
         const bx = i * (barWidth + 6);
-        const bh = fftHistoryRef.current[i] * (h * 0.7);
+        const bh = fftHistoryRef.current[i] * (h * 0.72);
         const by = h - bh;
 
-        ctx.fillStyle = isFault ? "rgba(244, 63, 94, 0.22)" : "rgba(245, 197, 68, 0.18)";
+        ctx.fillStyle = isFault ? "rgba(244, 63, 94, 0.25)" : "rgba(245, 197, 68, 0.20)";
         ctx.fillRect(bx, by, barWidth, bh);
 
         // Peak line
-        const py = h - fftPeaksRef.current[i] * (h * 0.7);
+        const py = h - fftPeaksRef.current[i] * (h * 0.72);
         ctx.fillStyle = isFault ? "#F43F5E" : "#F5C544";
         ctx.fillRect(bx, py, barWidth, 2);
       }
 
       // -------------------------------------------------------------
-      // 2. Draw Smooth Glowing Sine Waves
+      // 2. Draw Glowing Sine Waves
       // -------------------------------------------------------------
       if (activeMode === "multiaxis") {
         const renderTrace = (pts: number[], color: string, shadow: string, width: number) => {
@@ -139,7 +147,7 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
           ctx.beginPath();
           for (let i = 0; i < pts.length; i++) {
             const x = (i / (pts.length - 1)) * w;
-            const y = midY - pts[i] * (h * 0.38);
+            const y = midY - pts[i] * (h * 0.36);
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
           }
@@ -149,21 +157,21 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
 
         renderTrace(waveHistoryZRef.current, "#FF2A54", "rgba(255, 42, 84, 0.5)", 2.0);
         renderTrace(waveHistoryYRef.current, "#00FF66", "rgba(0, 255, 102, 0.5)", 2.0);
-        renderTrace(waveHistoryRef.current, "#00F0FF", "rgba(0, 240, 255, 0.8)", 3.0);
+        renderTrace(waveHistoryRef.current, "#00F0FF", "rgba(0, 240, 255, 0.8)", 3.2);
       } else {
-        // Classic Ultra-Smooth Single Sine Wave
+        // Classic Ultra-Smooth Single Sine Wave with Kinetic Glow
         const traceColor = isFault ? "#F43F5E" : "#0EA5E9";
         ctx.save();
         ctx.strokeStyle = traceColor;
-        ctx.lineWidth = 3.0;
+        ctx.lineWidth = isShaking ? 3.8 : 3.0;
         ctx.shadowColor = traceColor;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = isShaking ? 16 : 10;
         ctx.beginPath();
 
         const points = waveHistoryRef.current;
         for (let i = 0; i < points.length; i++) {
           const x = (i / (points.length - 1)) * w;
-          const y = midY - points[i] * (h * 0.38);
+          const y = midY - points[i] * (h * 0.36);
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -171,10 +179,10 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
 
         // Glowing Leading Edge Dot
         const lastVal = points[points.length - 1];
-        const lastY = midY - lastVal * (h * 0.38);
+        const lastY = midY - lastVal * (h * 0.36);
         ctx.fillStyle = traceColor;
         ctx.beginPath();
-        ctx.arc(w - 4, lastY, 5, 0, Math.PI * 2);
+        ctx.arc(w - 4, lastY, isShaking ? 7 : 5, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }
@@ -274,8 +282,8 @@ export const OscilloscopeTimelineCard: React.FC<OscilloscopeTimelineCardProps> =
 
         {/* Bottom Right Live Scale Overlay */}
         <div className="absolute bottom-2.5 right-4 flex items-center gap-3 text-[10px] font-mono text-neutral-400 bg-black/60 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-white/10 pointer-events-none">
-          <span>RMS: <strong className="text-[#F5C544]">{telemetry.rms.toFixed(3)}g</strong></span>
-          <span>ISO: <strong className="text-white">{telemetry.iso.toFixed(2)} mm/s</strong></span>
+          <span>RMS: <strong className="text-[#F5C544]">{(telemetry.rms || 0.082).toFixed(3)}g</strong></span>
+          <span>ISO: <strong className="text-white">{(telemetry.iso || 0.16).toFixed(2)} mm/s</strong></span>
           <span>FREQ: <strong className="text-sky-400">{(telemetry.f0 || targetHz).toFixed(1)} Hz</strong></span>
         </div>
       </div>
